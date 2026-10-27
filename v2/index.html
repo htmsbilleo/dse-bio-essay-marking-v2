@@ -403,6 +403,72 @@
     }
     .ocr-replace input { width: 1rem; height: 1rem; accent-color: var(--primary); }
 
+
+    /* Marking-scheme editable table */
+    .ms-table-editor {
+      margin-top: 0.55rem;
+      padding: 0.55rem 0.65rem;
+      background: #f7fafc;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .ms-table-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+      margin-bottom: 0.45rem;
+    }
+    .ms-table-toolbar .btn { font-size: 0.8rem; }
+    .ms-edit-table-host {
+      overflow-x: auto;
+      margin-top: 0.25rem;
+    }
+    .ms-edit-table {
+      border-collapse: collapse;
+      width: max-content;
+      min-width: 100%;
+      background: #fff;
+      font-size: 0.88rem;
+    }
+    .ms-edit-table th,
+    .ms-edit-table td {
+      border: 1px solid #c5d0db;
+      padding: 0.2rem;
+      min-width: 5.5rem;
+      vertical-align: top;
+    }
+    .ms-edit-table th {
+      background: #eef3f8;
+      font-weight: 650;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 0.78rem;
+    }
+    .ms-edit-table td input,
+    .ms-edit-table td[contenteditable="true"] {
+      display: block;
+      width: 100%;
+      min-width: 4.5rem;
+      min-height: 1.6rem;
+      border: none;
+      outline: none;
+      background: transparent;
+      font: inherit;
+      color: var(--text);
+      padding: 0.25rem 0.35rem;
+      box-sizing: border-box;
+    }
+    .ms-edit-table td[contenteditable="true"]:focus {
+      background: #fff8e8;
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    .ms-table-hint {
+      margin: 0.35rem 0 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
     /* Point-planning table */
     .pt-box {
       margin-top: 0.25rem;
@@ -1372,18 +1438,31 @@
           </div>
           <div class="field span-2">
             <label for="qb-ms">Marking／評分點（可選；預設學生唔見）</label>
-            <textarea id="qb-ms" class="tall mono" placeholder="一行一點；可貼上或上傳 marking 截圖 OCR。只喺「學生可見評分點」開啟時學生先見到"></textarea>
+            <textarea id="qb-ms" class="tall mono" placeholder="一行一點；可貼上、插入表格，或直接上載 marking 相片／截圖 OCR。只喺「學生可見評分點」開啟時學生先見到"></textarea>
+            <div class="ms-table-editor" data-ms-for="qb-ms">
+              <div class="ms-table-toolbar" id="qb-ms-table-toolbar" role="toolbar" aria-label="評分點表格工具">
+                <button type="button" class="btn btn-secondary btn-sm" data-ms-act="insert">插入表格</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-ms-act="add-row">加列</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-ms-act="add-col">加欄</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+              </div>
+              <div id="qb-ms-table" class="ms-edit-table-host" data-ms-target="qb-ms" hidden></div>
+              <p class="ms-table-hint">可插入可編輯表格（儲存時轉成 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
+            </div>
             <div class="ocr-box" data-ocr="qb-ms">
-              <div class="ocr-title">上傳 Marking／mark scheme 截圖 → 轉文字</div>
+              <div class="ocr-title">可直接上載圖片（相片／截圖）→ OCR 轉文字</div>
               <div class="ocr-row">
                 <input type="file" id="qb-ms-ocr-file" accept="image/*" />
                 <input type="file" id="qb-ms-ocr-cam" accept="image/*" capture="environment" />
-                <button type="button" class="btn btn-secondary btn-sm" id="qb-ms-ocr-pick">選擇相片</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="qb-ms-ocr-pick">選擇相片／圖片</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="qb-ms-ocr-camera">用相機</button>
                 <button type="button" class="btn btn-primary btn-sm" id="qb-ms-ocr-run" disabled>開始轉文字</button>
               </div>
               <label class="ocr-replace"><input type="checkbox" id="qb-ms-ocr-replace" checked /> 轉完清空再填</label>
-              <div class="ocr-preview-wrap"><img id="qb-ms-ocr-preview" class="ocr-preview" alt="預覽" hidden /></div>
+              <div class="ocr-preview-wrap"><img id="qb-ms-ocr-preview" class="ocr-preview" alt="已上載 Marking 圖片預覽" hidden /></div>
+              <p class="hint" style="margin:0.35rem 0 0;">支援 JPG／PNG／WEBP；上載後會顯示預覽，再按「開始轉文字」。若偵測到表格會自動填入可編輯表格。</p>
               <p id="qb-ms-ocr-status" class="ocr-status">待命</p>
             </div>
           </div>
@@ -1473,19 +1552,32 @@
         <textarea id="t-question" hidden></textarea>
         <div class="field">
           <label for="t-scheme">Mark scheme／評分點清單</label>
-          <textarea id="t-scheme" class="tall mono" placeholder="每行一點，例如：&#10;1. Enzyme lowers activation energy&#10;2. Substrate binds to active site&#10;3. …" aria-describedby="t-scheme-hint"></textarea>
-          <span id="t-scheme-hint" class="hint">一行一點；可用數字／符號開頭。本工具唔會發明官方 HKEAA mark scheme。</span>
+          <textarea id="t-scheme" class="tall mono" placeholder="每行一點，例如：&#10;1. Enzyme lowers activation energy&#10;2. Substrate binds to active site&#10;3. …&#10;或按「插入表格」編輯；亦可直接上載圖片 OCR。" aria-describedby="t-scheme-hint"></textarea>
+          <span id="t-scheme-hint" class="hint">一行一點；可用數字／符號開頭。亦可插入表格。本工具唔會發明官方 HKEAA mark scheme。</span>
+          <div class="ms-table-editor" data-ms-for="t-scheme">
+            <div class="ms-table-toolbar" id="t-scheme-table-toolbar" role="toolbar" aria-label="評分點表格工具">
+              <button type="button" class="btn btn-secondary btn-sm" data-ms-act="insert">插入表格</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-ms-act="add-row">加列</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-ms-act="add-col">加欄</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+            </div>
+            <div id="t-scheme-table" class="ms-edit-table-host" data-ms-target="t-scheme" hidden></div>
+            <p class="ms-table-hint">可插入可編輯表格（載入評分點／儲存時用 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
+          </div>
           <div class="ocr-box" data-ocr="t-scheme">
-            <div class="ocr-title">上傳 marking 截圖 → 轉文字</div>
+            <div class="ocr-title">可直接上載圖片（相片／截圖）→ OCR 轉文字</div>
             <div class="ocr-row">
               <input type="file" id="t-ms-ocr-file" accept="image/*" />
               <input type="file" id="t-ms-ocr-cam" accept="image/*" capture="environment" />
-              <button type="button" class="btn btn-secondary btn-sm" id="t-ms-ocr-pick">選擇相片</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="t-ms-ocr-pick">選擇相片／圖片</button>
               <button type="button" class="btn btn-ghost btn-sm" id="t-ms-ocr-camera">用相機</button>
               <button type="button" class="btn btn-primary btn-sm" id="t-ms-ocr-run" disabled>開始轉文字</button>
             </div>
             <label class="ocr-replace"><input type="checkbox" id="t-ms-ocr-replace" checked /> 轉完清空再填</label>
-            <div class="ocr-preview-wrap"><img id="t-ms-ocr-preview" class="ocr-preview" alt="預覽" hidden /></div>
+            <div class="ocr-preview-wrap"><img id="t-ms-ocr-preview" class="ocr-preview" alt="已上載 Marking 圖片預覽" hidden /></div>
+            <p class="hint" style="margin:0.35rem 0 0;">支援 JPG／PNG／WEBP；上載後會顯示預覽，再按「開始轉文字」。若偵測到表格會自動填入可編輯表格。</p>
             <p id="t-ms-ocr-status" class="ocr-status">待命</p>
           </div>
         </div>
@@ -2200,7 +2292,7 @@
       },
       teacher: {
         question: els.tQuestion.value,
-        scheme: els.tScheme.value,
+        scheme: (ensureMsTextSynced("t-scheme"), els.tScheme.value),
         provisional: els.tProvisional.checked,
         answer: els.tAnswer.value,
         markingPoints,
@@ -2312,7 +2404,7 @@
     if (els.qbQref) els.qbQref.value = "";
     if (els.qbTopic) els.qbTopic.value = "";
     if (els.qbQuestion) els.qbQuestion.value = "";
-    if (els.qbMs) els.qbMs.value = "";
+    if (els.qbMs) setMsFieldValue("qb-ms", "", { silent: true });
     if (els.qbMsVisible) els.qbMsVisible.checked = false;
     if (els.qbUpdate) els.qbUpdate.disabled = true;
     if (els.qbDelete) els.qbDelete.disabled = true;
@@ -2328,7 +2420,7 @@
     els.qbQref.value = item.qRef || "";
     els.qbTopic.value = item.topic || "";
     els.qbQuestion.value = item.questionText || "";
-    els.qbMs.value = item.markingPoints || "";
+    setMsFieldValue("qb-ms", item.markingPoints || "", { silent: true });
     els.qbMsVisible.checked = !!item.msStudentVisible;
     els.qbUpdate.disabled = false;
     els.qbDelete.disabled = false;
@@ -2355,7 +2447,7 @@
       qRef: (els.qbQref.value || "").trim(),
       topic: (els.qbTopic.value || "").trim(),
       questionText: questionText,
-      markingPoints: (els.qbMs.value || "").trim(),
+      markingPoints: (ensureMsTextSynced("qb-ms"), (els.qbMs.value || "").trim()),
       msStudentVisible: !!(els.qbMsVisible && els.qbMsVisible.checked),
       updatedAt: new Date().toISOString(),
     };
@@ -2398,7 +2490,7 @@
       useBtn.title = "填入老師題目／評分點欄";
       useBtn.addEventListener("click", () => {
         els.tQuestion.value = it.questionText || "";
-        if (it.markingPoints) els.tScheme.value = it.markingPoints;
+        if (it.markingPoints) setMsFieldValue("t-scheme", it.markingPoints, { silent: true });
         scheduleSave();
         showToast("已填入老師題目欄");
       });
@@ -2546,7 +2638,10 @@
     if (els.qbFromT) {
       els.qbFromT.addEventListener("click", () => {
         if (els.tQuestion.value.trim()) els.qbQuestion.value = els.tQuestion.value;
-        if (els.tScheme.value.trim()) els.qbMs.value = els.tScheme.value;
+        if (els.tScheme.value.trim()) {
+          ensureMsTextSynced("t-scheme");
+          setMsFieldValue("qb-ms", els.tScheme.value, { silent: true });
+        }
         showToast("已由 Marking 評分點／答案區帶入");
       });
     }
@@ -2578,7 +2673,7 @@
         const it = findBankItem(selectedBankId || PP_STORAGE.itemId);
         if (!it) { showToast("請先揀題庫題目"); return; }
         els.tQuestion.value = it.questionText;
-        if (it.markingPoints) els.tScheme.value = it.markingPoints;
+        if (it.markingPoints) setMsFieldValue("t-scheme", it.markingPoints, { silent: true });
         scheduleSave();
         showToast("已載入到老師題目欄");
         setMode("teacher");
@@ -2954,7 +3049,7 @@
     }
     setMode("teacher");
     const marks = item.marks != null ? item.marks : "?";
-    els.tScheme.value = "";
+    setMsFieldValue("t-scheme", "", { silent: true });
     els.tScheme.placeholder =
       "請由評卷／ANS Doc 複製評分點，一行一點。本題約 " + marks +
       " 分。因版權，本頁唔會嵌入官方 marking 全文。";
@@ -3880,7 +3975,7 @@
     if (els.tQuestion) els.tQuestion.value = sub.questionText || "";
     if (els.tAnswer) els.tAnswer.value = sub.answerText || "";
     const ms = findBankMsForSubmission(sub);
-    if (ms && els.tScheme) els.tScheme.value = ms;
+    if (ms && els.tScheme) setMsFieldValue("t-scheme", ms, { silent: true });
     scheduleSave();
     setMode("teacher");
     if (els.tAnswer) {
@@ -4384,6 +4479,7 @@
   }
 
   function loadMarkingPoints() {
+    ensureMsTextSynced("t-scheme");
     const lines = parseSchemeLines(els.tScheme.value);
     if (!lines.length) {
       showToast("請先喺評分點清單寫入內容");
@@ -4418,7 +4514,7 @@
 
   function resetTeacher() {
     els.tQuestion.value = "";
-    els.tScheme.value = "";
+    setMsFieldValue("t-scheme", "", { silent: true });
     els.tAnswer.value = "";
     els.tProvisional.checked = false;
     els.tProvisionalNote.hidden = true;
@@ -5049,6 +5145,295 @@
   }
 
 
+
+  /* ---------- Marking-scheme editable table ---------- */
+  const MS_TABLE_MAP = {
+    "qb-ms": { hostId: "qb-ms-table", toolbarId: "qb-ms-table-toolbar" },
+    "t-scheme": { hostId: "t-scheme-table", toolbarId: "t-scheme-table-toolbar" },
+  };
+
+  function msEscapeCell(s) {
+    return String(s == null ? "" : s).replace(/\s*\|\s*/g, "／").replace(/\r?\n/g, " ").trim();
+  }
+
+  function serializeMsGrid(grid) {
+    if (!grid || !grid.length) return "";
+    return grid.map((row) => {
+      const cells = (row || []).map(msEscapeCell);
+      return "| " + cells.join(" | ") + " |";
+    }).join("\n");
+  }
+
+  function splitMsRow(line) {
+    const t = String(line || "").trim();
+    if (!t) return null;
+    if (t.indexOf("|") >= 0) {
+      let parts = t.split("|").map((p) => p.trim());
+      if (parts.length && parts[0] === "") parts = parts.slice(1);
+      if (parts.length && parts[parts.length - 1] === "") parts = parts.slice(0, -1);
+      // skip markdown separator rows like |---|---|
+      if (parts.length && parts.every((p) => /^:?-{2,}:?$/.test(p))) return null;
+      return parts.length ? parts : null;
+    }
+    if (t.indexOf("\t") >= 0) {
+      const parts = t.split("\t").map((p) => p.trim());
+      return parts.length >= 2 ? parts : null;
+    }
+    if (/\s{2,}/.test(t)) {
+      const parts = t.split(/\s{2,}/).map((p) => p.trim()).filter(Boolean);
+      return parts.length >= 2 ? parts : null;
+    }
+    return null;
+  }
+
+  function parseMsTableText(text) {
+    const raw = String(text || "").replace(/\u00a0/g, " ").trim();
+    if (!raw) return null;
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) return null;
+    const rows = [];
+    for (const line of lines) {
+      const cells = splitMsRow(line);
+      if (!cells || cells.length < 2) {
+        // allow a few non-table lines mixed in → fail closed
+        if (rows.length) return null;
+        continue;
+      }
+      rows.push(cells);
+    }
+    if (rows.length < 2) return null;
+    const colCounts = {};
+    rows.forEach((r) => { colCounts[r.length] = (colCounts[r.length] || 0) + 1; });
+    let bestCols = 0, bestN = 0;
+    Object.keys(colCounts).forEach((k) => {
+      const n = colCounts[k];
+      const c = Number(k);
+      if (n > bestN || (n === bestN && c > bestCols)) { bestN = n; bestCols = c; }
+    });
+    if (bestCols < 2 || bestN < 2) return null;
+    // keep rows that match bestCols (pad/truncate lightly)
+    const out = rows.filter((r) => r.length === bestCols || Math.abs(r.length - bestCols) <= 1)
+      .map((r) => {
+        const copy = r.slice(0, bestCols);
+        while (copy.length < bestCols) copy.push("");
+        return copy;
+      });
+    return out.length >= 2 ? out : null;
+  }
+
+  function looksLikeMsTable(text) {
+    return !!parseMsTableText(text);
+  }
+
+  function readMsGridFromHost(host) {
+    if (!host) return null;
+    const table = host.querySelector("table.ms-edit-table");
+    if (!table) return null;
+    const grid = [];
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      const row = [];
+      tr.querySelectorAll("td").forEach((td) => {
+        const inp = td.querySelector("input");
+        row.push(inp ? inp.value : (td.textContent || ""));
+      });
+      grid.push(row);
+    });
+    return grid.length ? grid : null;
+  }
+
+  function syncMsTableToTextarea(targetId) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    const host = $(meta.hostId);
+    const ta = $(targetId);
+    if (!host || !ta || host.hidden) return;
+    const grid = readMsGridFromHost(host);
+    if (!grid) return;
+    const text = serializeMsGrid(grid);
+    if (ta.value !== text) {
+      ta.value = text;
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+
+  function ensureMsTextSynced(targetId) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    const host = $(meta.hostId);
+    if (host && !host.hidden && host.querySelector("table.ms-edit-table")) {
+      syncMsTableToTextarea(targetId);
+    }
+  }
+
+  function renderMsEditTable(host, grid) {
+    if (!host) return;
+    const rows = Math.max(1, (grid && grid.length) || 3);
+    const cols = Math.max(1, (grid && grid[0] && grid[0].length) || 3);
+    const data = grid || Array.from({ length: rows }, () => Array(cols).fill(""));
+    host.innerHTML = "";
+    host.hidden = false;
+    const table = document.createElement("table");
+    table.className = "ms-edit-table";
+    table.setAttribute("role", "grid");
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (let c = 0; c < cols; c++) {
+      const th = document.createElement("th");
+      th.textContent = "欄" + (c + 1);
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (let r = 0; r < rows; r++) {
+      const tr = document.createElement("tr");
+      for (let c = 0; c < cols; c++) {
+        const td = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.value = (data[r] && data[r][c] != null) ? String(data[r][c]) : "";
+        inp.setAttribute("aria-label", "列" + (r + 1) + " 欄" + (c + 1));
+        inp.addEventListener("input", () => {
+          const tid = host.getAttribute("data-ms-target");
+          if (tid) {
+            syncMsTableToTextarea(tid);
+            if (typeof scheduleSave === "function") scheduleSave();
+          }
+        });
+        td.appendChild(inp);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  function clearMsEditTable(targetId) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    const host = $(meta.hostId);
+    if (!host) return;
+    host.innerHTML = "";
+    host.hidden = true;
+  }
+
+  function loadMsTableFromText(targetId, text, opts) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return false;
+    const host = $(meta.hostId);
+    if (!host) return false;
+    const grid = parseMsTableText(text);
+    if (!grid) {
+      if (opts && opts.clearIfNotTable) clearMsEditTable(targetId);
+      return false;
+    }
+    host.setAttribute("data-ms-target", targetId);
+    renderMsEditTable(host, grid);
+    return true;
+  }
+
+  function setMsFieldValue(targetId, text, opts) {
+    const ta = $(targetId);
+    if (!ta) return;
+    const next = text == null ? "" : String(text);
+    ta.value = next;
+    if (!next.trim()) {
+      clearMsEditTable(targetId);
+    } else {
+      loadMsTableFromText(targetId, next, { clearIfNotTable: !(opts && opts.keepTableIfPlain) });
+    }
+    if (!(opts && opts.silent)) {
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+
+  function applyOcrMsTableHeuristic(targetId, filledText, replace) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return { table: false };
+    const ta = $(targetId);
+    const host = $(meta.hostId);
+    if (!ta || !host) return { table: false };
+    // Always inspect the textarea content after OCR fill (replace or append).
+    const source = (ta.value || filledText || "").trim();
+    const grid = parseMsTableText(source);
+    if (grid) {
+      host.setAttribute("data-ms-target", targetId);
+      renderMsEditTable(host, grid);
+      const serialized = serializeMsGrid(grid);
+      ta.value = serialized;
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      return { table: true };
+    }
+    return { table: false };
+  }
+
+  function msTableMutate(targetId, action) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    const host = $(meta.hostId);
+    if (!host) return;
+    let grid = readMsGridFromHost(host);
+    if (action === "insert") {
+      grid = Array.from({ length: 3 }, () => ["", "", ""]);
+      host.setAttribute("data-ms-target", targetId);
+      renderMsEditTable(host, grid);
+      syncMsTableToTextarea(targetId);
+      showToast("已插入 3×3 表格");
+      if (typeof scheduleSave === "function") scheduleSave();
+      return;
+    }
+    if (action === "clear") {
+      clearMsEditTable(targetId);
+      // leave textarea as-is so teacher can keep plain text; optional clear if was table-only
+      showToast("已清空可編輯表格");
+      return;
+    }
+    if (!grid) {
+      showToast("請先按「插入表格」");
+      return;
+    }
+    const rows = grid.length;
+    const cols = grid[0] ? grid[0].length : 0;
+    if (action === "add-row") {
+      grid.push(Array(cols).fill(""));
+    } else if (action === "add-col") {
+      grid.forEach((r) => r.push(""));
+    } else if (action === "del-row") {
+      if (rows <= 1) { showToast("至少保留 1 列"); return; }
+      grid.pop();
+    } else if (action === "del-col") {
+      if (cols <= 1) { showToast("至少保留 1 欄"); return; }
+      grid.forEach((r) => r.pop());
+    }
+    renderMsEditTable(host, grid);
+    syncMsTableToTextarea(targetId);
+    if (typeof scheduleSave === "function") scheduleSave();
+  }
+
+  function wireMsTableEditors() {
+    Object.keys(MS_TABLE_MAP).forEach((targetId) => {
+      const meta = MS_TABLE_MAP[targetId];
+      const toolbar = $(meta.toolbarId);
+      const host = $(meta.hostId);
+      if (host) host.setAttribute("data-ms-target", targetId);
+      if (!toolbar) return;
+      toolbar.querySelectorAll("[data-ms-act]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          msTableMutate(targetId, btn.getAttribute("data-ms-act"));
+        });
+      });
+      const ta = $(targetId);
+      if (ta) {
+        ta.addEventListener("blur", () => {
+          // if textarea looks like a table, rebuild UI
+          if (looksLikeMsTable(ta.value)) loadMsTableFromText(targetId, ta.value, {});
+        });
+      }
+    });
+  }
+
+
   /* ---------- OCR (Tesseract.js) ---------- */
   const OCR_LANG = "chi_tra+eng";
   const ocrSlots = {};
@@ -5158,9 +5543,21 @@
           target.value = target.value.replace(/\s*$/, "") + "\n\n" + textOut;
         }
         target.dispatchEvent(new Event("input", { bubbles: true }));
+        if (cfg.tableAware && MS_TABLE_MAP[cfg.targetId]) {
+          const det = applyOcrMsTableHeuristic(cfg.targetId, textOut, replace);
+          if (det.table) {
+            setOcrStatus(status, "完成 — 已偵測表格，已填入可編輯表格", "ok");
+            showToast("已偵測表格，已填入可編輯表格");
+          } else {
+            clearMsEditTable(cfg.targetId);
+            setOcrStatus(status, "完成 — 未偵測到表格，已填純文字", "ok");
+            showToast("未偵測到表格，已填純文字");
+          }
+        } else {
+          setOcrStatus(status, "完成", "ok");
+          showToast(cfg.toastMsg || "已轉文字並填入題目");
+        }
         scheduleSave();
-        setOcrStatus(status, "完成", "ok");
-        showToast(cfg.toastMsg || "已轉文字並填入題目");
       } catch (err) {
         const why = (err && err.message) ? err.message : String(err || "未知錯誤");
         setOcrStatus(status, "失敗：" + why + "（離線／被擋 CDN 時可改喺 Grok Bot 對話直接傳相 OCR）", "err");
@@ -5197,6 +5594,7 @@
     previewId: "qb-ms-ocr-preview",
     statusId: "qb-ms-ocr-status",
     toastMsg: "已轉文字並填入評分點",
+    tableAware: true,
   });
   bindOcrWidget({
     targetId: "t-scheme",
@@ -5209,6 +5607,7 @@
     previewId: "t-ms-ocr-preview",
     statusId: "t-ms-ocr-status",
     toastMsg: "已轉文字並填入評分點",
+    tableAware: true,
   });
 
   if (window.__tesseractLoadFailed || (document.readyState === "complete" && !tesseractReady())) {
@@ -5227,6 +5626,8 @@
       });
     }
   });
+
+  wireMsTableEditors();
 
   /* ---------- Point-planning table (student-first) ---------- */
   const COMMAND_WORD_RE = /概要討論|討論|解釋|說明|比較|描述|suggest(?:ion)?s?|discuss(?:ion)?|explain|compare|contrast|describe/gi;
@@ -5503,9 +5904,9 @@
       }
     });
     const block = lines.join("\n");
+    ensureMsTextSynced("t-scheme");
     const cur = els.tScheme.value.trim();
-    els.tScheme.value = cur ? cur + "\n" + block : block;
-    els.tScheme.dispatchEvent(new Event("input", { bubbles: true }));
+    setMsFieldValue("t-scheme", cur ? cur + "\n" + block : block, { silent: true });
     scheduleSave();
     showToast("已同步到評分點清單");
     setMode("teacher");
@@ -5636,7 +6037,7 @@
 
     if (data.teacher) {
       els.tQuestion.value = data.teacher.question || "";
-      els.tScheme.value = data.teacher.scheme || "";
+      setMsFieldValue("t-scheme", data.teacher.scheme || "", { silent: true });
       els.tAnswer.value = data.teacher.answer || "";
       els.tProvisional.checked = !!data.teacher.provisional;
       els.tProvisionalNote.hidden = !els.tProvisional.checked;
