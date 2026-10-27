@@ -1347,7 +1347,7 @@
 
           <div class="sc-linked" id="s-sc-linked" aria-labelledby="s-sc-heading">
             <h3 id="s-sc-heading">自評表（跟 Point Table 細題）</h3>
-            <p class="hint" style="margin:0 0 0.65rem;">拆完細題後，每條細題下面可加「評分點」列：勾已中、寫「我寫咗咩／要點點改」。資料存 localStorage。</p>
+            <p class="hint" style="margin:0 0 0.65rem;">拆完細題後，每條細題下面可加「評分點」列：勾「已中」即可。資料存 localStorage。</p>
             <div id="s-checklist" class="checklist" aria-label="按細題分組嘅自評評分點"></div>
             <div class="actions" style="margin-top:0.55rem;">
               <button type="button" class="btn btn-ghost btn-sm" id="s-reset-checklist">重設自評表</button>
@@ -2257,7 +2257,7 @@
   let packageText = "";
   let markingPoints = []; // { id, text, status: 'hit'|'partial'|'miss'|'', reason: '' }
   let lastAiReport = "";
-  let selfCheckMap = {}; // subId -> [{ id, hit, point, wrote, fix }]
+  let selfCheckMap = {}; // subId -> [{ id, hit, point }] (wrote/fix kept empty for old-draft compat)
   let finalAnswerUnlocked = false; // session + localStorage gate for 最後學生答案
 
   let toastTimer = null;
@@ -3467,11 +3467,9 @@
       let any = false;
       ids.forEach((sid) => {
         (selfCheckMap[sid] || []).forEach((row) => {
-          if (!(row.point || row.wrote || row.fix || row.hit)) return;
+          if (!(row.point || row.hit)) return;
           any = true;
-          lines.push("- " + (row.hit ? "✅" : "☐") + " " + (row.point || "") +
-            (row.wrote ? "｜我寫咗：" + row.wrote : "") +
-            (row.fix ? "｜要改：" + row.fix : ""));
+          lines.push("- " + (row.hit ? "✅" : "☐") + " " + (row.point || ""));
         });
       });
       if (!any) lines.push("（尚未填自評）");
@@ -4159,7 +4157,7 @@
       const rows = selfCheckMap[ids[i]] || [];
       for (let j = 0; j < rows.length; j++) {
         const r = rows[j];
-        if ((r.point || "").trim() || (r.wrote || "").trim() || (r.fix || "").trim() || r.hit) return true;
+        if ((r.point || "").trim() || r.hit) return true;
       }
     }
     return false;
@@ -4210,8 +4208,8 @@
   function maybeReseedSelfCheckForSub(sub) {
     if (!sub || !sub.id) return;
     const rows = Array.isArray(selfCheckMap[sub.id]) ? selfCheckMap[sub.id] : [];
-    const customized = rows.some((r) => (r.wrote || "").trim() || (r.fix || "").trim() || r.hit);
-    if (customized) return; // keep user hit/wrote/fix
+    const customized = rows.some((r) => r.hit);
+    if (customized) return; // keep user hit
     const seeded = pointsFromSubText(sub.points);
     selfCheckMap[sub.id] = seeded.length ? seeded : [emptyPointRow()];
   }
@@ -4301,23 +4299,7 @@
         pIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 評分點 " + (idx + 1));
         pIn.addEventListener("input", () => { row.point = pIn.value; scheduleSave(); updateFinalAnswerGate(); });
 
-        const wIn = document.createElement("input");
-        wIn.type = "text";
-        wIn.placeholder = "我寫咗咩";
-        wIn.value = row.wrote || "";
-        wIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 我寫咗咩 " + (idx + 1));
-        wIn.addEventListener("input", () => { row.wrote = wIn.value; scheduleSave(); });
-
-        const fIn = document.createElement("input");
-        fIn.type = "text";
-        fIn.placeholder = "要點點改";
-        fIn.value = row.fix || "";
-        fIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 要點點改 " + (idx + 1));
-        fIn.addEventListener("input", () => { row.fix = fIn.value; scheduleSave(); });
-
         fields.appendChild(pIn);
-        fields.appendChild(wIn);
-        fields.appendChild(fIn);
 
         const del = document.createElement("button");
         del.type = "button";
@@ -4723,9 +4705,7 @@
             chunks.push(
               "- (" + sid + "#" + (j + 1) + ") " +
               (row.hit ? "已中" : "未中") + "｜" +
-              (row.point || "") +
-              (row.wrote ? "｜我寫咗：" + row.wrote : "") +
-              (row.fix ? "｜要改：" + row.fix : "")
+              (row.point || "")
             );
           });
         });
