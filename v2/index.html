@@ -5195,6 +5195,19 @@
     return false;
   }
 
+  /** True only when the entire cell is footer noise, not a point that mentions those words. */
+  function isWholeCellMsNoise(s) {
+    const t = String(s || "").trim();
+    if (!t) return false;
+    if (/^[DS]\s*$/i.test(t) || /^[DS]\s*[=＝]/.test(t)) return true;
+    if (/^Q?\s*\d{1,3}[\.、．]\s*$/i.test(t) || /^\d{1,3}\s*$/.test(t)) return true;
+    if (/^(溝通|清晰|有條理|系統)$/.test(t)) return true;
+    if (/^communication$/i.test(t) || /^total\s*marks?$/i.test(t)) return true;
+    if (/^C\s*[=＝]/.test(t)) return true;
+    if (/^(最高\s*\d+|共\s*\d+\s*分|\d+\s*分)$/.test(t)) return true;
+    return false;
+  }
+
   /** Merge OCR mid-sentence fragments that do not end with (n) into the previous item. */
   function mergeBrokenMsPlainItems(items) {
     const out = [];
@@ -5332,10 +5345,27 @@
     return null;
   }
 
+  function isMdSeparatorLine(line) {
+    let t = String(line || "").trim().replace(/｜/g, "|");
+    if (t.indexOf("|") < 0) return false;
+    const parts = t.split("|").map((p) => p.trim()).filter((p) => p !== "");
+    return parts.length >= 2 && parts.every((p) => /^:?-{2,}:?$/.test(p));
+  }
+
+  /** Drop plain OCR noise and separator rows. Keep a pipe row that still has a real point. */
+  function shouldDropMsSourceLine(line) {
+    if (isMdSeparatorLine(line)) return true;
+    const cells = splitMsRow(line);
+    if (cells && cells.length >= 2) {
+      return cells.every((c) => !String(c || "").trim() || isWholeCellMsNoise(c));
+    }
+    return isMsNoiseLine(line);
+  }
+
   function parseMsTableTextClassic(lines) {
     const rows = [];
     for (const line of lines) {
-      if (isMsNoiseLine(line)) continue; // skip footer / q-number / communication lines
+      if (shouldDropMsSourceLine(line)) continue; // skip footer / q-number / separator lines
       const cells = splitMsRow(line);
       if (!cells || cells.length < 2) {
         // non-footer non-table after rows started → fail closed
@@ -5419,7 +5449,7 @@
 
     const allLines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const hints = extractMsFooterColHints(raw);
-    const content = allLines.filter((l) => !isMsNoiseLine(l));
+    const content = allLines.filter((l) => !shouldDropMsSourceLine(l));
     if (content.length < 1) return null;
 
     const detected = detectDse2ColHeaders(raw);
@@ -5505,7 +5535,7 @@
     const detected = detectDse2ColHeaders(raw);
     const hints = extractMsFooterColHints(raw);
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      .filter((l) => !isMsNoiseLine(l));
+      .filter((l) => !shouldDropMsSourceLine(l));
     if (!lines.length) return null;
 
     const plain = [];
@@ -5841,14 +5871,11 @@
     if (!meta || !ta || !host || !grid || !grid.length) return false;
     let g = grid.map((r) => (r || []).slice());
     if (!g[0] || g[0].length !== 2) return false;
-    // Drop footer noise that landed in its own cell. A longer marking point
-    // that merely contains words like 系統 must stay intact.
-    g = g.map((row, ri) => row.map((c) => {
+    // Drop a cell only when the whole cell is footer noise (D=, 溝通, 11.).
+    // Keep a marking point that merely contains words like 系統.
+    g = g.map((row) => row.map((c) => {
       const s = String(c == null ? "" : c).trim();
-      if (ri === 0 || !s) return s;
-      if (/^[DS]\s*$/i.test(s) || /^[DS]\s*[=＝]/.test(s)) return "";
-      if (s.length <= 16 && isMsNoiseLine(s)) return "";
-      return s;
+      return isWholeCellMsNoise(s) ? "" : s;
     }));
     if (!isDse2ColHeaderRow(g[0])) {
       const detected = detectDse2ColHeaders(serializeMsGrid(g) + "\n" + (ta.value || ""));
