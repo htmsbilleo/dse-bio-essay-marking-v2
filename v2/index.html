@@ -1116,7 +1116,6 @@
           <button type="button" id="tab-teacher" role="tab" aria-selected="false" aria-pressed="false" aria-controls="panel-teacher" tabindex="-1">老師</button>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" id="teacher-lock" hidden>鎖定老師模式</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="teacher-pin-change" hidden>更改 PIN</button>
       </div>
     </header>
 
@@ -1610,19 +1609,15 @@
 
   <div id="teacher-gate" class="teacher-gate" hidden>
     <div class="teacher-gate-card" role="dialog" aria-modal="true" aria-labelledby="teacher-gate-title" aria-describedby="teacher-gate-msg">
-      <h2 id="teacher-gate-title">老師模式</h2>
-      <p id="teacher-gate-msg">請輸入 4–8 位數字 PIN。</p>
+      <h2 id="teacher-gate-title">輸入老師 PIN</h2>
+      <p id="teacher-gate-msg">老師模式要用共用 PIN（可包含英文字母、數字同符號）。系統只核對加鹽 SHA-256，唔會保存你輸入嘅 PIN。學生模式唔使 PIN。</p>
       <form id="teacher-gate-form">
         <div class="field">
-          <label for="teacher-gate-pin">PIN（4–8 位數字）</label>
-          <input id="teacher-gate-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" />
-        </div>
-        <div class="field" id="teacher-gate-confirm-wrap" hidden>
-          <label for="teacher-gate-pin2">再輸入一次</label>
-          <input id="teacher-gate-pin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="8" />
+          <label for="teacher-gate-pin">老師 PIN</label>
+          <input id="teacher-gate-pin" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" />
         </div>
         <div class="actions">
-          <button type="submit" class="btn btn-primary btn-sm" id="teacher-gate-submit">確認</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="teacher-gate-submit">進入老師模式</button>
           <button type="button" class="btn btn-ghost btn-sm" id="teacher-gate-cancel">取消</button>
         </div>
         <p id="teacher-gate-status" class="hint" role="status" aria-live="polite"></p>
@@ -1649,6 +1644,10 @@
   const TEACHER_LOCKOUT_KEY = "dse-bio-teacher-lockout-v2";
   const PIN_MAX_FAILS = 5;
   const PIN_LOCKOUT_MS = 45 * 1000;
+  const PIN_MAX_LENGTH = 64;
+  // Shared gate for every visitor. Plaintext is never stored; only this salt and hash are valid.
+  const SHARED_TEACHER_PIN_SALT = "8e80402c71bffd38231264b1a5470c68";
+  const SHARED_TEACHER_PIN_HASH = "8036dd5f109eafbd8fba42884c90593d238d1288c18f76c224694440109421c0";
   const XAI_API_URL = "https://api.x.ai/v1/chat/completions";
   const XAI_DEFAULT_MODEL = "grok-4.7";
   const FINAL_UNLOCK_KEY = "dse-bio-final-answer-unlocked-v1";
@@ -1971,14 +1970,11 @@
     tabTeacher: $("tab-teacher"),
     modeTablist: $("mode-tablist"),
     teacherLock: $("teacher-lock"),
-    teacherPinChange: $("teacher-pin-change"),
     teacherGate: $("teacher-gate"),
     teacherGateTitle: $("teacher-gate-title"),
     teacherGateMsg: $("teacher-gate-msg"),
     teacherGateForm: $("teacher-gate-form"),
     teacherGatePin: $("teacher-gate-pin"),
-    teacherGateConfirmWrap: $("teacher-gate-confirm-wrap"),
-    teacherGatePin2: $("teacher-gate-pin2"),
     teacherGateSubmit: $("teacher-gate-submit"),
     teacherGateCancel: $("teacher-gate-cancel"),
     teacherGateStatus: $("teacher-gate-status"),
@@ -2119,7 +2115,6 @@
 
   let mode = "student";
   let teacherUnlocked = false;
-  let teacherGateMode = "enter";
   let pinFailMemory = { fails: 0, lockedUntil: 0 };
   let pinLockoutTimer = null;
   let packageText = "";
@@ -2999,17 +2994,11 @@
   }
 
   function canHashPin() {
-    return !!(window.crypto && crypto.subtle && typeof crypto.subtle.digest === "function" && crypto.getRandomValues);
+    return !!(window.crypto && crypto.subtle && typeof crypto.subtle.digest === "function");
   }
 
   function bytesToHex(buf) {
     return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
-  function randomSalt() {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    return bytesToHex(bytes);
   }
 
   async function hashPin(pin, salt) {
@@ -3018,18 +3007,25 @@
     return bytesToHex(buf);
   }
 
-  function readPinRecord() {
+  function discardLegacyPinRecord() {
     try {
-      const raw = localStorage.getItem(TEACHER_PIN_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed.salt !== "string" || typeof parsed.hash !== "string") return null;
-      if (!parsed.salt || !parsed.hash) return null;
-      if (Object.prototype.hasOwnProperty.call(parsed, "pin")) return null;
-      return { salt: parsed.salt, hash: parsed.hash };
-    } catch (_) {
-      return null;
+      localStorage.removeItem(TEACHER_PIN_KEY);
+    } catch (_) { /* private mode */ }
+  }
+
+  function readPinRecord() {
+    discardLegacyPinRecord();
+    return { salt: SHARED_TEACHER_PIN_SALT, hash: SHARED_TEACHER_PIN_HASH };
+  }
+
+  function pinShapeOk(pin) {
+    if (!pin || pin.length > PIN_MAX_LENGTH) return false;
+    if (/\s/.test(pin)) return false;
+    for (let i = 0; i < pin.length; i += 1) {
+      const code = pin.charCodeAt(i);
+      if (code < 0x20 || code === 0x7f) return false;
     }
+    return true;
   }
 
   function readLockout() {
@@ -3067,7 +3063,6 @@
 
   function clearPinInputs() {
     if (els.teacherGatePin) els.teacherGatePin.value = "";
-    if (els.teacherGatePin2) els.teacherGatePin2.value = "";
   }
 
   function setGateStatus(msg) {
@@ -3125,36 +3120,22 @@
     if (restoreFocus && els.tabStudent) els.tabStudent.focus();
   }
 
-  function openTeacherGate(nextMode) {
+  function openTeacherGate() {
     if (!els.teacherGate) return;
-    teacherGateMode = nextMode;
-    const needsConfirm = nextMode === "setup" || nextMode === "change";
-    if (els.teacherGateTitle) {
-      els.teacherGateTitle.textContent = nextMode === "setup"
-        ? "設定老師 PIN"
-        : (nextMode === "change" ? "更改老師 PIN" : "輸入老師 PIN");
-    }
+    if (els.teacherGateTitle) els.teacherGateTitle.textContent = "輸入老師 PIN";
     if (els.teacherGateMsg) {
-      els.teacherGateMsg.textContent = nextMode === "setup"
-        ? "第一次用老師模式要設定 4–8 位數字 PIN。系統只儲存加鹽 SHA-256 雜湊，唔會保存 PIN 本身。忘記就要清除呢個網站嘅本機資料。"
-        : (nextMode === "change"
-          ? "輸入新嘅 4–8 位數字 PIN。舊 PIN 會即時失效。仍然只儲存雜湊。"
-          : "學生模式唔會顯示老師工具。請輸入 PIN。");
+      els.teacherGateMsg.textContent = "老師模式要用共用 PIN（可包含英文字母、數字同符號）。系統只核對加鹽 SHA-256，唔會保存你輸入嘅 PIN。學生模式唔使 PIN。";
     }
-    if (els.teacherGateConfirmWrap) els.teacherGateConfirmWrap.hidden = !needsConfirm;
-    if (els.teacherGateSubmit) {
-      els.teacherGateSubmit.textContent = nextMode === "enter" ? "進入老師模式" : "儲存 PIN";
-    }
+    if (els.teacherGateSubmit) els.teacherGateSubmit.textContent = "進入老師模式";
     clearPinInputs();
     els.teacherGate.hidden = false;
-    if (nextMode !== "change" && lockoutRemainingMs() > 0) startLockoutTicker();
+    if (lockoutRemainingMs() > 0) startLockoutTicker();
     else setGateStatus("");
     if (els.teacherGatePin) els.teacherGatePin.focus();
   }
 
   function syncTeacherLockUi() {
     if (els.teacherLock) els.teacherLock.hidden = !teacherUnlocked;
-    if (els.teacherPinChange) els.teacherPinChange.hidden = !teacherUnlocked;
     document.body.classList.toggle("teacher-unlocked", teacherUnlocked);
   }
 
@@ -3162,11 +3143,11 @@
     const wantTeacher = next === "teacher";
     if (wantTeacher && !teacherUnlocked) {
       if (!canHashPin()) {
-        showToast("請用 https 開啟本頁先可以設定老師 PIN");
+        showToast("請用 https 開啟本頁先可以核對老師 PIN");
         if (els.tabStudent) els.tabStudent.focus();
         return;
       }
-      openTeacherGate(readPinRecord() ? "enter" : "setup");
+      openTeacherGate();
       return;
     }
     if (els.teacherGate && !els.teacherGate.hidden) closeTeacherGate(false);
@@ -3195,17 +3176,6 @@
     if (els.tabStudent) els.tabStudent.focus();
   }
 
-  async function saveNewPin(pin) {
-    const salt = randomSalt();
-    const hash = await hashPin(pin, salt);
-    const record = { salt: salt, hash: hash };
-    localStorage.setItem(TEACHER_PIN_KEY, JSON.stringify(record));
-    const saved = readPinRecord();
-    if (!saved || saved.hash !== hash || saved.salt !== salt) {
-      throw new Error("pin-store");
-    }
-  }
-
   async function onTeacherGateSubmit(ev) {
     ev.preventDefault();
     if (!canHashPin()) {
@@ -3213,36 +3183,17 @@
       return;
     }
     const pin = (els.teacherGatePin && els.teacherGatePin.value || "").trim();
-    const pin2 = (els.teacherGatePin2 && els.teacherGatePin2.value || "").trim();
     clearPinInputs();
-    if (!/^\d{4,8}$/.test(pin)) {
-      setGateStatus("PIN 必須係 4 至 8 位數字。");
+    if (!pinShapeOk(pin)) {
+      setGateStatus("請輸入 PIN（可包含英文字母、數字同符號，最長 " + PIN_MAX_LENGTH + " 個字元，唔好有空白）。");
       return;
     }
-    if (teacherGateMode !== "change" && lockoutRemainingMs() > 0) {
+    if (lockoutRemainingMs() > 0) {
       startLockoutTicker();
       return;
     }
     try {
-      if (teacherGateMode === "setup" || teacherGateMode === "change") {
-        if (pin !== pin2) {
-          setGateStatus("兩次 PIN 唔一致。");
-          return;
-        }
-        await saveNewPin(pin);
-        writeLockout({ fails: 0, lockedUntil: 0 });
-        teacherUnlocked = true;
-        closeTeacherGate(false);
-        setMode("teacher");
-        if (els.tabTeacher) els.tabTeacher.focus();
-        showToast(teacherGateMode === "change" ? "已更改 PIN" : "已設定 PIN，進入老師模式");
-        return;
-      }
       const record = readPinRecord();
-      if (!record) {
-        openTeacherGate("setup");
-        return;
-      }
       const hash = await hashPin(pin, record.salt);
       if (hash !== record.hash) {
         notePinFailure();
@@ -3256,7 +3207,7 @@
       showToast("已進入老師模式");
     } catch (_) {
       teacherUnlocked = false;
-      setGateStatus("儲存 PIN 失敗（可能私密模式或空間不足）。未進入老師模式。");
+      setGateStatus("核對 PIN 失敗。未進入老師模式。");
     }
   }
 
@@ -3282,12 +3233,7 @@
   els.tabTeacher.addEventListener("click", () => setMode("teacher"));
   if (els.modeTablist) els.modeTablist.addEventListener("keydown", onModeTabKeydown);
   if (els.teacherLock) els.teacherLock.addEventListener("click", lockTeacherMode);
-  if (els.teacherPinChange) {
-    els.teacherPinChange.addEventListener("click", () => {
-      if (!teacherUnlocked) return;
-      openTeacherGate("change");
-    });
-  }
+  discardLegacyPinRecord();
   if (els.teacherGateForm) els.teacherGateForm.addEventListener("submit", (ev) => { onTeacherGateSubmit(ev); });
   if (els.teacherGateCancel) {
     els.teacherGateCancel.addEventListener("click", () => closeTeacherGate(true));
