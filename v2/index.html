@@ -496,6 +496,15 @@
       font-size: 0.8rem;
       color: var(--text-muted);
     }
+    .ms-ai-arrange-status {
+      margin: 0.3rem 0 0;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      min-height: 1.1em;
+    }
+    .ms-ai-arrange-status.is-busy { color: var(--accent); }
+    .ms-ai-arrange-status.is-ok { color: var(--ok); }
+    .ms-ai-arrange-status.is-err { color: var(--danger); }
 
     /* Point-planning table */
     .pt-box {
@@ -1475,6 +1484,7 @@
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
                 <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="qb-ms-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
               </div>
+              <p id="qb-ms-ai-arrange-status" class="ms-ai-arrange-status" role="status" aria-live="polite" hidden></p>
               <div id="qb-ms-table" class="ms-edit-table-host" data-ms-target="qb-ms" hidden></div>
               <p class="ms-table-hint">可插入可編輯表格（儲存時轉成 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
             </div>
@@ -1592,6 +1602,7 @@
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
               <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="t-scheme-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
             </div>
+            <p id="t-scheme-ai-arrange-status" class="ms-ai-arrange-status" role="status" aria-live="polite" hidden></p>
             <div id="t-scheme-table" class="ms-edit-table-host" data-ms-target="t-scheme" hidden></div>
             <p class="ms-table-hint">可插入可編輯表格（載入評分點／儲存時用 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
           </div>
@@ -5934,26 +5945,71 @@
     return applyMsArrangeGrid(targetId, grid, toastMsg || "未連 AI，用本機重排");
   }
 
+  function truncateMsAiErr(msg, maxLen) {
+    const s = String(msg || "").replace(/\s+/g, " ").trim();
+    const n = maxLen || 80;
+    if (!s) return "未知錯誤";
+    return s.length <= n ? s : (s.slice(0, n - 1) + "…");
+  }
+
+  function msAiArrangeStatusId(targetId) {
+    return targetId === "qb-ms" ? "qb-ms-ai-arrange-status" : "t-scheme-ai-arrange-status";
+  }
+
+  function setMsAiArrangeStatus(targetId, msg, kind) {
+    const el = $(msAiArrangeStatusId(targetId));
+    if (!el) return;
+    const text = String(msg || "").trim();
+    el.textContent = text;
+    el.hidden = !text;
+    el.classList.remove("is-busy", "is-ok", "is-err");
+    if (text && kind) el.classList.add("is-" + kind);
+  }
+
   async function callGrokForMsArrange(messages) {
     const settings = loadXaiSettings();
     const keyFromUi = (els.tAiKey && els.tAiKey.value ? els.tAiKey.value : "").trim();
     const apiKey = keyFromUi || settings.apiKey || "";
     const model = ((els.tAiModel && els.tAiModel.value) || settings.model || XAI_DEFAULT_MODEL).trim();
-    const direct = !!(els.tAiDirect && els.tAiDirect.checked);
+    const hasDirectCheckbox = !!(els.tAiDirect);
+    const directOptIn = hasDirectCheckbox ? !!els.tAiDirect.checked : !!apiKey;
     const hasProxy = !!effectiveWebAppUrl();
-    if (!hasProxy && !(direct && apiKey)) {
+
+    if (hasDirectCheckbox && els.tAiDirect.checked && !apiKey) {
+      return { ok: false, needKey: true, error: "請先儲存／貼上 xAI API key" };
+    }
+    if (!hasProxy && !directOptIn) {
       return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
     }
+    if (directOptIn && !apiKey && !hasProxy) {
+      return { ok: false, needKey: true, error: "請先儲存／貼上 xAI API key" };
+    }
+    if (!hasProxy && !(directOptIn && apiKey)) {
+      return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
+    }
+
     let result = null;
+    // Prefer direct first when user opted in (or page has a key) and key is present.
+    if (directOptIn && apiKey) {
+      result = await callGrokDirect(apiKey, model, messages);
+      if (result.ok) return result;
+      if (hasProxy) {
+        const proxyResult = await callGrokViaProxy(model, messages);
+        if (proxyResult.ok) return proxyResult;
+      }
+      return result;
+    }
+
     if (hasProxy) {
       result = await callGrokViaProxy(model, messages);
-      if (!result.ok && direct && apiKey) {
+      // Always fall back to direct after proxy fail when a key is available.
+      if (!result.ok && apiKey) {
         result = await callGrokDirect(apiKey, model, messages);
       }
-    } else {
-      result = await callGrokDirect(apiKey, model, messages);
+      return result;
     }
-    return result;
+
+    return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
   }
 
   async function runMsAiArrange(targetId) {
@@ -5972,10 +6028,12 @@
     else if (!ocrHollow) source = ocrRaw;
     else {
       showToast("未有評分點文字可排");
+      setMsAiArrangeStatus(targetId, "未有評分點文字可排", "err");
       return;
     }
     const btn = $(targetId === "qb-ms" ? "qb-ms-ai-arrange" : "t-scheme-ai-arrange");
     if (btn) btn.disabled = true;
+    setMsAiArrangeStatus(targetId, "排緊…", "busy");
     showToast("排緊…");
     const messages = [
       { role: "system", content: buildMsArrangeSystemPrompt() },
@@ -5984,7 +6042,19 @@
     try {
       const result = await callGrokForMsArrange(messages);
       if (!result || !result.ok) {
-        applyMsArrangeLocalFallback(targetId, source, "未連 AI，用本機重排");
+        if (result && result.needKey) {
+          const msg = "請先儲存／貼上 xAI API key";
+          showToast(msg);
+          setMsAiArrangeStatus(targetId, msg, "err");
+          applyMsArrangeLocalFallback(targetId, source, "未連 AI，用本機重排");
+          return;
+        }
+        const errShort = truncateMsAiErr(result && result.error, 80);
+        const toastMsg = (result && result.skipped)
+          ? "未連 AI，用本機重排"
+          : ("AI 失敗：" + errShort + "，用本機重排");
+        setMsAiArrangeStatus(targetId, errShort, "err");
+        applyMsArrangeLocalFallback(targetId, source, toastMsg);
         return;
       }
       const tableText = extractMsTableFromAiContent(result.content);
@@ -5998,16 +6068,23 @@
       // Discard hollow AI output — rebuild from OCR raw / source
       if (!grid || isHollowMsGrid(grid)) {
         const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        setMsAiArrangeStatus(targetId, "AI 輸出無效，改用本機重排", "err");
         applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：AI 輸出無效，改用本機重排");
         return;
       }
       if (!applyMsArrangeGrid(targetId, grid, "已排好")) {
         const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        setMsAiArrangeStatus(targetId, "套用失敗，改用本機重排", "err");
         applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：改用本機重排");
+      } else {
+        const via = result.via === "proxy" ? "代理" : "直接 xAI";
+        setMsAiArrangeStatus(targetId, "已排好（" + via + "）", "ok");
       }
     } catch (err) {
       const fallbackSrc = !ocrHollow ? ocrRaw : source;
-      applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：改用本機重排");
+      const errShort = truncateMsAiErr(err && err.message, 80);
+      setMsAiArrangeStatus(targetId, errShort, "err");
+      applyMsArrangeLocalFallback(targetId, fallbackSrc, "AI 失敗：" + errShort + "，用本機重排");
     } finally {
       if (btn) btn.disabled = false;
     }
