@@ -446,6 +446,7 @@
       font-size: 0.78rem;
     }
     .ms-edit-table td input,
+    .ms-edit-table th input,
     .ms-edit-table td[contenteditable="true"] {
       display: block;
       width: 100%;
@@ -462,6 +463,33 @@
     .ms-edit-table td[contenteditable="true"]:focus {
       background: #fff8e8;
       box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    /* Exam-paper-like 2-col DSE Q11 marking table */
+    .ms-edit-table.ms-edit-table--dse2 {
+      border: 2px solid #1a1a1a;
+      width: 100%;
+      min-width: 100%;
+    }
+    .ms-edit-table.ms-edit-table--dse2 th,
+    .ms-edit-table.ms-edit-table--dse2 td {
+      border: 1.5px solid #1a1a1a;
+      min-width: 10rem;
+    }
+    .ms-edit-table.ms-edit-table--dse2 thead th {
+      background: #f3f3f3;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 0.92rem;
+      text-align: center;
+      padding: 0.35rem 0.4rem;
+    }
+    .ms-edit-table.ms-edit-table--dse2 thead th input {
+      font-weight: 700;
+      text-align: center;
+      color: var(--text);
+    }
+    .ms-edit-table.ms-edit-table--dse2 tbody td input {
+      text-align: left;
     }
     .ms-table-hint {
       margin: 0.35rem 0 0;
@@ -5150,9 +5178,21 @@
     return /溝通|Communication|^\s*D\s*=|^\s*S\s*=|最高\s*\d|共\s*\d+\s*分|\d+\s*分\s*$|C\s*=|清晰|有條理|系統/.test(t);
   }
 
-  const MS_LEFT_HEADER_RE = /相同|不同|比較|差異|優點|缺點|利弊|相似/;
+  function isMsNoiseLine(line) {
+    const t = String(line || "").trim();
+    if (!t) return true;
+    if (isMsFooterLine(t)) return true;
+    // bare question numbers beside the table (e.g. "11.")
+    if (/^Q?\s*\d{1,3}[\.、．]\s*$/i.test(t)) return true;
+    if (/^\d{1,3}\s*$/.test(t)) return true;
+    return false;
+  }
+
+  const MS_LEFT_HEADER_RE = /相同|相異|不同|比較|差異|優點|缺點|利弊|相似/;
   const MS_RIGHT_HEADER_RE = /意義|重要性|原因|解釋/;
   const MS_MARK_TOKEN_RE = /[（(]\s*\d+\s*[）)]\s*$/;
+  const MS_DEFAULT_LEFT_HEADER = "相異之處";
+  const MS_DEFAULT_RIGHT_HEADER = "意義／重要性";
 
   function looksLikeMsHeaderLine(line, side) {
     const t = String(line || "").trim();
@@ -5164,6 +5204,75 @@
 
   function endsWithMsMarkToken(line) {
     return MS_MARK_TOKEN_RE.test(String(line || "").trim());
+  }
+
+  function stripMsBullet(line) {
+    return String(line || "").replace(/^[\s•‧·．。\-\*◦▪▸►○]+/u, "").trim();
+  }
+
+  /** Default 相異之處|意義／重要性; switch left to 相同之處 when OCR says so. */
+  function detectDse2ColHeaders(rawText) {
+    const raw = String(rawText || "");
+    let left = MS_DEFAULT_LEFT_HEADER;
+    let right = MS_DEFAULT_RIGHT_HEADER;
+
+    if (/相同之處/.test(raw) && !/相異之處/.test(raw)) left = "相同之處";
+    else if (/相異之處/.test(raw)) left = "相異之處";
+    else if (/相同/.test(raw) && !/相異|不同|差異/.test(raw)) left = "相同之處";
+
+    if (/意義\s*[／\/]\s*重要性/.test(raw)) right = "意義／重要性";
+    else if (/重要性/.test(raw) && !/意義/.test(raw)) right = "重要性";
+    else if (/意義/.test(raw)) right = "意義／重要性";
+
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (let i = 0; i < Math.min(lines.length, 8); i++) {
+      const line = lines[i];
+      if (isMsFooterLine(line)) continue;
+      const sp = splitMsRow(line);
+      if (
+        sp && sp.length >= 2 &&
+        looksLikeMsHeaderLine(sp[0], "left") &&
+        looksLikeMsHeaderLine(sp[1], "right")
+      ) {
+        return { left: sp[0], right: sp[1], headerLines: 1, headerConsumed: [i] };
+      }
+      if (
+        looksLikeMsHeaderLine(line, "left") &&
+        lines[i + 1] && looksLikeMsHeaderLine(lines[i + 1], "right")
+      ) {
+        return {
+          left: line,
+          right: lines[i + 1],
+          headerLines: 2,
+          headerConsumed: [i, i + 1],
+        };
+      }
+    }
+    return { left: left, right: right, headerLines: 0, headerConsumed: [] };
+  }
+
+  /** Read D=(n) / S=(最高 n) before skipping footers — helps unequal column pairing. */
+  function extractMsFooterColHints(rawText) {
+    const raw = String(rawText || "");
+    let left = null;
+    let right = null;
+    const d = raw.match(/(?:^|\n)\s*D\s*=\s*[（(]\s*(\d+)\s*[）)]/);
+    const sMax = raw.match(/(?:^|\n)\s*S\s*=\s*[（(]\s*最高\s*(\d+)\s*[）)]/);
+    const s = raw.match(/(?:^|\n)\s*S\s*=\s*(?:最高\s*)?[（(]\s*(\d+)\s*[）)]/);
+    if (d) left = Number(d[1]);
+    if (sMax) right = Number(sMax[1]);
+    else if (s) right = Number(s[1]);
+    if (left == null && right == null) return null;
+    return { left: left, right: right };
+  }
+
+  function zipMsColumns(leftItems, rightItems) {
+    const n = Math.max(leftItems.length, rightItems.length, 0);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push([leftItems[i] || "", rightItems[i] || ""]);
+    }
+    return out;
   }
 
   function splitMsRow(line) {
@@ -5193,7 +5302,7 @@
   function parseMsTableTextClassic(lines) {
     const rows = [];
     for (const line of lines) {
-      if (isMsFooterLine(line)) continue; // skip footer / communication lines
+      if (isMsNoiseLine(line)) continue; // skip footer / q-number / communication lines
       const cells = splitMsRow(line);
       if (!cells || cells.length < 2) {
         // non-footer non-table after rows started → fail closed
@@ -5221,31 +5330,66 @@
     return out.length >= 2 ? out : null;
   }
 
-  function flushMsPlainPairs(plain, out) {
+  /**
+   * Pair plain OCR lines into 2-col rows.
+   * Prefers footer D/S counts (column-major: left points then right),
+   * then unequal column-major when mark-token heavy, else row-major alternate.
+   */
+  function flushMsPlainPairs(plain, out, hints) {
     if (!plain.length) return;
-    const markish = plain.filter(endsWithMsMarkToken).length;
-    const preferPair = markish >= Math.ceil(plain.length / 2) || plain.length >= 2;
-    if (preferPair) {
-      for (let k = 0; k < plain.length; k += 2) {
-        if (k + 1 < plain.length) out.push([plain[k], plain[k + 1]]);
-        else out.push([plain[k], ""]);
-      }
-    } else {
-      for (const line of plain) out.push([line, ""]);
-    }
+    const items = plain.map(stripMsBullet).filter(Boolean);
     plain.length = 0;
+    const markish = items.filter(endsWithMsMarkToken).length;
+    const preferPair = markish >= Math.ceil(items.length / 2) || items.length >= 2;
+    if (!preferPair) {
+      for (const line of items) out.push([line, ""]);
+      return;
+    }
+
+    if (hints && hints.left != null && hints.left > 0 && items.length >= hints.left) {
+      const leftItems = items.slice(0, hints.left);
+      let rightItems = items.slice(hints.left);
+      if (hints.right != null && hints.right > 0 && rightItems.length > hints.right) {
+        rightItems = rightItems.slice(0, hints.right);
+      }
+      out.push.apply(out, zipMsColumns(leftItems, rightItems));
+      return;
+    }
+
+    // Column-major for unequal (1)-bullet dumps: left block then right block
+    if (markish >= Math.max(1, items.length - 1) && items.length >= 3) {
+      const splitAt = Math.floor(items.length / 2); // leftover → right (S often ≥ D)
+      out.push.apply(out, zipMsColumns(items.slice(0, splitAt), items.slice(splitAt)));
+      return;
+    }
+
+    for (let k = 0; k < items.length; k += 2) {
+      if (k + 1 < items.length) out.push([items[k], items[k + 1]]);
+      else out.push([items[k], ""]);
+    }
+  }
+
+  function isDse2ColHeaderRow(row) {
+    if (!row || row.length !== 2) return false;
+    const a = String(row[0] || "");
+    const b = String(row[1] || "");
+    if (looksLikeMsHeaderLine(a, "left") || looksLikeMsHeaderLine(b, "right")) return true;
+    return /相異之處|相同之處|意義|重要性/.test(a + b);
   }
 
   /** Header-aware 2-col rebuild for typical HKDSE Bio Q11 Chinese mark schemes. */
-  function rebuildDse2ColMsTable(rawText) {
+  function rebuildDse2ColMsTable(rawText, opts) {
     const raw = String(rawText || "").replace(/\u00a0/g, " ").trim();
     if (!raw) return null;
-    if (!(MS_LEFT_HEADER_RE.test(raw) && MS_RIGHT_HEADER_RE.test(raw))) return null;
+    const force = !!(opts && opts.force);
+    if (!force && !(MS_LEFT_HEADER_RE.test(raw) && MS_RIGHT_HEADER_RE.test(raw))) return null;
 
     const allLines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const content = allLines.filter((l) => !isMsFooterLine(l));
-    if (content.length < 2) return null;
+    const hints = extractMsFooterColHints(raw);
+    const content = allLines.filter((l) => !isMsNoiseLine(l));
+    if (content.length < 1) return null;
 
+    const detected = detectDse2ColHeaders(raw);
     const rows = [];
     let i = 0;
 
@@ -5272,7 +5416,7 @@
     } else if (looksLikeMsHeaderLine(content[0])) {
       const h = content[0];
       const rightMatch = h.match(/(意義|重要性|原因|解釋)/);
-      const leftMatch = h.match(/(相同|不同|比較|差異|優點|缺點|利弊|相似)/);
+      const leftMatch = h.match(/(相同|相異|不同|比較|差異|優點|缺點|利弊|相似)/);
       if (leftMatch && rightMatch && rightMatch.index > leftMatch.index) {
         const left = h.slice(0, rightMatch.index).trim();
         const right = h.slice(rightMatch.index).trim();
@@ -5282,42 +5426,75 @@
         }
       }
       if (!rows.length) {
-        rows.push(["相同／不同／比較", "意義／重要性"]);
-        i = 1;
+        rows.push([detected.left, detected.right]);
+        i = looksLikeMsHeaderLine(content[0]) ? 1 : 0;
       }
     } else {
-      rows.push(["相同／不同／比較", "意義／重要性"]);
+      rows.push([detected.left, detected.right]);
       i = 0;
     }
 
-    const body = content.slice(i);
-    if (!body.length) return rows.length >= 2 ? rows : null;
+    // Drop any residual lone header lines from body
+    const body = [];
+    for (const line of content.slice(i)) {
+      if (looksLikeMsHeaderLine(line) && line.length <= 24) continue;
+      body.push(line);
+    }
+    if (!body.length) {
+      rows.push(["", ""]);
+      return rows;
+    }
 
     const plain = [];
     const mixed = [];
     for (const line of body) {
       const split = splitMsRow(line);
       if (split && split.length >= 2) {
-        flushMsPlainPairs(plain, mixed);
-        mixed.push([split[0], split.slice(1).join(" ")]);
+        flushMsPlainPairs(plain, mixed, hints);
+        mixed.push([stripMsBullet(split[0]), stripMsBullet(split.slice(1).join(" "))]);
       } else {
         plain.push(line);
       }
     }
-    flushMsPlainPairs(plain, mixed);
+    flushMsPlainPairs(plain, mixed, hints);
     for (const r of mixed) rows.push(r);
+    if (rows.length < 2) rows.push(["", ""]);
     return rows.length >= 2 ? rows : null;
   }
 
   function forceBuildMs2ColGrid(text) {
     const raw = String(text || "").replace(/\u00a0/g, " ").trim();
     if (!raw) return null;
+    // Always aim for real DSE Paper 1B Q11 2-col layout
+    const rebuilt = rebuildDse2ColMsTable(raw, { force: true });
+    if (rebuilt && rebuilt.length >= 2) return rebuilt;
+
+    const detected = detectDse2ColHeaders(raw);
+    const hints = extractMsFooterColHints(raw);
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      .filter((l) => !isMsFooterLine(l));
+      .filter((l) => !isMsNoiseLine(l));
     if (!lines.length) return null;
-    const grid = [["相同／不同／比較", "意義／重要性"]];
-    for (const line of lines) grid.push([line, ""]);
-    return grid.length >= 2 ? grid : null;
+
+    const plain = [];
+    const mixed = [];
+    for (const line of lines) {
+      if (looksLikeMsHeaderLine(line) && line.length <= 24) continue;
+      const split = splitMsRow(line);
+      if (split && split.length >= 2) {
+        flushMsPlainPairs(plain, mixed, hints);
+        mixed.push([stripMsBullet(split[0]), stripMsBullet(split.slice(1).join(" "))]);
+      } else {
+        plain.push(line);
+      }
+    }
+    flushMsPlainPairs(plain, mixed, hints);
+    const grid = [[detected.left, detected.right]];
+    if (mixed.length) {
+      for (const r of mixed) grid.push(r);
+    } else {
+      grid.push(["", ""]);
+    }
+    return grid;
   }
 
   function parseMsTableText(text) {
@@ -5327,7 +5504,16 @@
     if (lines.length < 2) return null;
 
     const classic = parseMsTableTextClassic(lines);
-    if (classic) return classic;
+    if (classic) {
+      // Normalize classic 2-col header defaults toward DSE labels when missing
+      if (classic.length && classic[0] && classic[0].length === 2 && !isDse2ColHeaderRow(classic[0])) {
+        const detected = detectDse2ColHeaders(raw);
+        if (MS_LEFT_HEADER_RE.test(raw) || MS_RIGHT_HEADER_RE.test(raw) || /相異|相同之處/.test(raw)) {
+          return [[detected.left, detected.right]].concat(classic);
+        }
+      }
+      return classic;
+    }
 
     // Header-aware 2-col rebuild (plain OCR lines without | / tabs)
     const rebuilt = rebuildDse2ColMsTable(raw);
@@ -5345,6 +5531,14 @@
     const table = host.querySelector("table.ms-edit-table");
     if (!table) return null;
     const grid = [];
+    if (table.classList.contains("ms-edit-table--dse2")) {
+      const headerRow = [];
+      table.querySelectorAll("thead tr th").forEach((th) => {
+        const inp = th.querySelector("input");
+        headerRow.push(inp ? inp.value : (th.textContent || ""));
+      });
+      if (headerRow.length) grid.push(headerRow);
+    }
     table.querySelectorAll("tbody tr").forEach((tr) => {
       const row = [];
       tr.querySelectorAll("td").forEach((td) => {
@@ -5380,6 +5574,16 @@
     }
   }
 
+  function bindMsCellInput(inp, host) {
+    inp.addEventListener("input", () => {
+      const tid = host.getAttribute("data-ms-target");
+      if (tid) {
+        syncMsTableToTextarea(tid);
+        if (typeof scheduleSave === "function") scheduleSave();
+      }
+    });
+  }
+
   function renderMsEditTable(host, grid) {
     if (!host) return;
     const rows = Math.max(1, (grid && grid.length) || 3);
@@ -5388,33 +5592,47 @@
     host.innerHTML = "";
     host.hidden = false;
     const table = document.createElement("table");
-    table.className = "ms-edit-table";
+    const dse2 = cols === 2 && data.length && isDse2ColHeaderRow(data[0]);
+    table.className = dse2 ? "ms-edit-table ms-edit-table--dse2" : "ms-edit-table";
     table.setAttribute("role", "grid");
+
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
-    for (let c = 0; c < cols; c++) {
-      const th = document.createElement("th");
-      th.textContent = "欄" + (c + 1);
-      hr.appendChild(th);
+    let bodyData = data;
+    if (dse2) {
+      // Chinese headers in thead (editable), body = marking points row-by-row
+      for (let c = 0; c < cols; c++) {
+        const th = document.createElement("th");
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.value = (data[0] && data[0][c] != null) ? String(data[0][c]) : (c === 0 ? MS_DEFAULT_LEFT_HEADER : MS_DEFAULT_RIGHT_HEADER);
+        inp.setAttribute("aria-label", "表頭 欄" + (c + 1));
+        bindMsCellInput(inp, host);
+        th.appendChild(inp);
+        hr.appendChild(th);
+      }
+      bodyData = data.slice(1);
+      if (!bodyData.length) bodyData = [Array(cols).fill("")];
+    } else {
+      for (let c = 0; c < cols; c++) {
+        const th = document.createElement("th");
+        th.textContent = "欄" + (c + 1);
+        hr.appendChild(th);
+      }
     }
     thead.appendChild(hr);
     table.appendChild(thead);
+
     const tbody = document.createElement("tbody");
-    for (let r = 0; r < rows; r++) {
+    for (let r = 0; r < bodyData.length; r++) {
       const tr = document.createElement("tr");
       for (let c = 0; c < cols; c++) {
         const td = document.createElement("td");
         const inp = document.createElement("input");
         inp.type = "text";
-        inp.value = (data[r] && data[r][c] != null) ? String(data[r][c]) : "";
+        inp.value = (bodyData[r] && bodyData[r][c] != null) ? String(bodyData[r][c]) : "";
         inp.setAttribute("aria-label", "列" + (r + 1) + " 欄" + (c + 1));
-        inp.addEventListener("input", () => {
-          const tid = host.getAttribute("data-ms-target");
-          if (tid) {
-            syncMsTableToTextarea(tid);
-            if (typeof scheduleSave === "function") scheduleSave();
-          }
-        });
+        bindMsCellInput(inp, host);
         td.appendChild(inp);
         tr.appendChild(td);
       }
@@ -5472,17 +5690,20 @@
     if (!ta || !host) return { table: false };
     // Always inspect the textarea content after OCR fill (replace or append).
     const source = (ta.value || filledText || "").trim();
-    let grid = parseMsTableText(source);
+    let grid = null;
     let forced = false;
-    let mode = grid ? "parse" : undefined;
+    let mode = undefined;
 
-    if (!grid && opts.forceTable) {
-      // parse already tried classic + DSE 2-col; force a usable 2-col grid for editing
+    if (opts.forceTable) {
+      // 「開始轉表格＋文字」: always produce DSE-like 2-col layout
       grid = forceBuildMs2ColGrid(source);
       if (grid) {
         forced = true;
-        mode = "force-lines";
+        mode = "force-dse2";
       }
+    } else {
+      grid = parseMsTableText(source);
+      if (grid) mode = "parse";
     }
 
     if (grid) {
@@ -5528,7 +5749,9 @@
     } else if (action === "add-col") {
       grid.forEach((r) => r.push(""));
     } else if (action === "del-row") {
-      if (rows <= 1) { showToast("至少保留 1 列"); return; }
+      // keep at least header + 1 body for dse2, or 1 row otherwise
+      const minRows = (cols === 2 && isDse2ColHeaderRow(grid[0])) ? 2 : 1;
+      if (rows <= minRows) { showToast("至少保留 1 列"); return; }
       grid.pop();
     } else if (action === "del-col") {
       if (cols <= 1) { showToast("至少保留 1 欄"); return; }
