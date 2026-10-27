@@ -17,14 +17,14 @@ https://dse-bio-essay-marking.vercel.app/
 
 ## 改善版老師要做嘅設定
 
-設定只存在**該部瀏覽器**。學生用自己部手機交卷，就要喺嗰部手機由老師解鎖後貼上並儲存；網站唔會自動派發網址。
+Apps Script、題庫等設定只存在**該部瀏覽器**。老師 PIN 則係全站共用：任何瀏覽器撳「老師」都要輸入同一個 PIN。學生用自己部手機交卷，就要喺嗰部手機由老師解鎖後貼上並儲存交卷網址；網站唔會自動派發網址。
 
-1. 打開 `/v2/`，撳「老師」。第一次要設定 **4–8 位數字 PIN**。頁面只儲存加鹽 SHA-256 雜湊，唔會保存 PIN 本身。忘記 PIN 就要清除呢個網站嘅本機資料。
+1. 打開 `/v2/`，撳「老師」，輸入**共用老師 PIN**。任何瀏覽器都用同一組 PIN。PIN 可以包含英文字母、數字同符號，最長 64 個字元。頁面只核對內建加鹽 SHA-256 雜湊，唔會保存 PIN 本身，亦冇「更改 PIN」。清除本機資料唔會重設呢個 PIN。
 2. 連續 **5 次** PIN 錯誤會鎖定大約 **45 秒**。
-3. 用完撳頁頂「鎖定老師模式」。未解鎖之前，學生模式唔會顯示老師工具。
+3. 用完撳頁頂「鎖定老師模式」。未解鎖之前，學生模式唔會顯示老師工具。學生模式本身唔使 PIN。
 4. 喺「交卷一覽」貼上**你自己**嘅 Apps Script Web App URL，可選再貼 Google Sheet 連結，然後按「儲存交卷設定」。
 5. **未儲存 Web App 之前**，學生撳交卷只會寫入該瀏覽器嘅 `localStorage`。狀態列會寫明冇送到 Google Sheet。
-6. 可選「課堂權杖」。有填先會放進 POST JSON 嘅 `classroomToken`，方便 Apps Script 核對。權杖、Web App URL、Sheet URL、API key、PIN 都**唔好**寫入原始碼，亦**唔好** commit。
+6. 可選「課堂權杖」。有填先會放進 POST JSON 嘅 `classroomToken`，方便 Apps Script 核對。權杖、Web App URL、Sheet URL、API key、PIN 明文都**唔好**寫入原始碼，亦**唔好** commit。
 
 xAI：
 
@@ -54,4 +54,4 @@ var token = props.getProperty("CLASSROOM_TOKEN");
 
 ## 秘密
 
-唔好 commit API key、Apps Script URL、Google Sheet URL、課堂權杖、PIN 或 `.env`。老師喺瀏覽器貼上就得。
+唔好 commit API key、Apps Script URL、Google Sheet URL、課堂權杖、PIN 明文或 `.env`。共用老師 PIN 只以加鹽雜湊放喺改善版頁面；明文唔好寫入檔案、commit 或 PR。其他秘密由老師喺瀏覽器貼上就得。
