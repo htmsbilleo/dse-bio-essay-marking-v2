@@ -1473,6 +1473,7 @@
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+                <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="qb-ms-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
               </div>
               <div id="qb-ms-table" class="ms-edit-table-host" data-ms-target="qb-ms" hidden></div>
               <p class="ms-table-hint">可插入可編輯表格（儲存時轉成 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
@@ -1589,6 +1590,7 @@
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+              <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="t-scheme-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
             </div>
             <div id="t-scheme-table" class="ms-edit-table-host" data-ms-target="t-scheme" hidden></div>
             <p class="ms-table-hint">可插入可編輯表格（載入評分點／儲存時用 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
@@ -5159,6 +5161,8 @@
     "qb-ms": { hostId: "qb-ms-table", toolbarId: "qb-ms-table-toolbar" },
     "t-scheme": { hostId: "t-scheme-table", toolbarId: "t-scheme-table-toolbar" },
   };
+  /** Recent raw OCR text per MS target (qb-ms / t-scheme), for AI rearrange. */
+  const msLastOcrRaw = {};
 
   function msEscapeCell(s) {
     return String(s == null ? "" : s).replace(/\s*\|\s*/g, "／").replace(/\r?\n/g, " ").trim();
@@ -5175,7 +5179,7 @@
   function isMsFooterLine(line) {
     const t = String(line || "").trim();
     if (!t) return false;
-    return /溝通|Communication|^\s*D\s*=|^\s*S\s*=|最高\s*\d|共\s*\d+\s*分|\d+\s*分\s*$|C\s*=|清晰|有條理|系統/.test(t);
+    return /溝通|Communication|^\s*D\s*[=＝]|^\s*S\s*[=＝]|最高\s*\d|共\s*\d+\s*分|\d+\s*分\s*$|C\s*[=＝]|清晰|有條理|系統|total\s*marks?/i.test(t);
   }
 
   function isMsNoiseLine(line) {
@@ -5185,7 +5189,36 @@
     // bare question numbers beside the table (e.g. "11.")
     if (/^Q?\s*\d{1,3}[\.、．]\s*$/i.test(t)) return true;
     if (/^\d{1,3}\s*$/.test(t)) return true;
+    // never put lone D / S (or D=/S= fragments) into cells
+    if (/^[DS]\s*$/i.test(t)) return true;
+    if (/^[DS]\s*[=＝]/.test(t)) return true;
     return false;
+  }
+
+  /** Merge OCR mid-sentence fragments that do not end with (n) into the previous item. */
+  function mergeBrokenMsPlainItems(items) {
+    const out = [];
+    for (const raw of items) {
+      let line = stripMsBullet(raw);
+      if (!line || isMsNoiseLine(line)) continue;
+      if (/^[DS]\s*[=＝]/.test(line)) continue;
+      if (!out.length) {
+        out.push(line);
+        continue;
+      }
+      const prev = out[out.length - 1];
+      // incomplete previous body cell → glue this fragment on (never glue onto headers)
+      if (
+        !endsWithMsMarkToken(prev) &&
+        !looksLikeMsHeaderLine(prev) &&
+        !looksLikeMsHeaderLine(line)
+      ) {
+        out[out.length - 1] = (prev + " " + line).replace(/\s+/g, " ").trim();
+      } else {
+        out.push(line);
+      }
+    }
+    return out;
   }
 
   const MS_LEFT_HEADER_RE = /相同|相異|不同|比較|差異|優點|缺點|利弊|相似/;
@@ -5337,7 +5370,7 @@
    */
   function flushMsPlainPairs(plain, out, hints) {
     if (!plain.length) return;
-    const items = plain.map(stripMsBullet).filter(Boolean);
+    const items = mergeBrokenMsPlainItems(plain);
     plain.length = 0;
     const markish = items.filter(endsWithMsMarkToken).length;
     const preferPair = markish >= Math.ceil(items.length / 2) || items.length >= 2;
@@ -5762,6 +5795,151 @@
     if (typeof scheduleSave === "function") scheduleSave();
   }
 
+
+  function buildMsArrangeSystemPrompt() {
+    return [
+      "你係 HKDSE 生物 Paper 1B 論述題 mark scheme 表格整理助手。",
+      "只輸出一個 markdown／pipe 兩欄表格，唔好加解釋、前言、後記，亦唔好用 code fence。",
+      "規則：",
+      "1. 第一列（表頭）必須係「相異之處|意義／重要性」或「相同之處|意義／重要性」（按內容判斷）。",
+      "2. 之後每一列一個評分點：左欄差異／相同之處，右欄意義／重要性；保留 (1) 等分數標記。",
+      "3. 合理配對左右欄（差異對應其意義）。",
+      "4. 排除頁腳同雜訊：D=、S=、溝通、最高、總分／total marks、光禿題號（如 11.）。",
+      "5. 唔好發明評分點；只重整 OCR／現有文字。空白格用空字串。",
+    ].join("\n");
+  }
+
+  function buildMsArrangeUserMessage(currentText, ocrRaw) {
+    let msg = "請將以下 messy mark scheme 重排成乾淨兩欄表格。\n\n【目前文字／表格】\n" + String(currentText || "");
+    if (ocrRaw && String(ocrRaw).trim() && String(ocrRaw).trim() !== String(currentText || "").trim()) {
+      msg += "\n\n【近期 OCR 原文（參考）】\n" + String(ocrRaw).trim();
+    }
+    return msg;
+  }
+
+  function extractMsTableFromAiContent(content) {
+    let t = String(content || "").trim();
+    t = t.replace(/^```(?:markdown|md|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const lines = t.split(/\r?\n/);
+    const tableLines = [];
+    let started = false;
+    for (const line of lines) {
+      if (String(line).indexOf("|") >= 0) {
+        started = true;
+        tableLines.push(line);
+      } else if (started) {
+        break;
+      }
+    }
+    return tableLines.length ? tableLines.join("\n") : t;
+  }
+
+  function applyMsArrangeGrid(targetId, grid, toastMsg) {
+    const meta = MS_TABLE_MAP[targetId];
+    const ta = $(targetId);
+    const host = meta && $(meta.hostId);
+    if (!meta || !ta || !host || !grid || !grid.length) return false;
+    let g = grid.map((r) => (r || []).slice());
+    if (!g[0] || g[0].length !== 2) return false;
+    // Drop footer noise that landed in its own cell. A longer marking point
+    // that merely contains words like 系統 must stay intact.
+    g = g.map((row, ri) => row.map((c) => {
+      const s = String(c == null ? "" : c).trim();
+      if (ri === 0 || !s) return s;
+      if (/^[DS]\s*$/i.test(s) || /^[DS]\s*[=＝]/.test(s)) return "";
+      if (s.length <= 16 && isMsNoiseLine(s)) return "";
+      return s;
+    }));
+    if (!isDse2ColHeaderRow(g[0])) {
+      const detected = detectDse2ColHeaders(serializeMsGrid(g) + "\n" + (ta.value || ""));
+      g = [[detected.left, detected.right]].concat(g);
+    }
+    host.setAttribute("data-ms-target", targetId);
+    renderMsEditTable(host, g);
+    const serialized = serializeMsGrid(g);
+    ta.value = serialized;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    showToast(toastMsg || "已排好");
+    if (typeof scheduleSave === "function") scheduleSave();
+    return true;
+  }
+
+  function applyMsArrangeLocalFallback(targetId, source, toastMsg) {
+    const grid = forceBuildMs2ColGrid(source);
+    if (!grid) {
+      showToast("失敗：本機重排亦唔得");
+      return false;
+    }
+    return applyMsArrangeGrid(targetId, grid, toastMsg || "未連 AI，用本機重排");
+  }
+
+  async function callGrokForMsArrange(messages) {
+    const settings = loadXaiSettings();
+    const keyFromUi = (els.tAiKey && els.tAiKey.value ? els.tAiKey.value : "").trim();
+    const apiKey = keyFromUi || settings.apiKey || "";
+    const model = ((els.tAiModel && els.tAiModel.value) || settings.model || XAI_DEFAULT_MODEL).trim();
+    const direct = !!(els.tAiDirect && els.tAiDirect.checked);
+    const hasProxy = !!effectiveWebAppUrl();
+    if (!hasProxy && !(direct && apiKey)) {
+      return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
+    }
+    let result = null;
+    if (hasProxy) {
+      result = await callGrokViaProxy(model, messages);
+      if (!result.ok && direct && apiKey) {
+        result = await callGrokDirect(apiKey, model, messages);
+      }
+    } else {
+      result = await callGrokDirect(apiKey, model, messages);
+    }
+    return result;
+  }
+
+  async function runMsAiArrange(targetId) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    ensureMsTextSynced(targetId);
+    const ta = $(targetId);
+    if (!ta) return;
+    const current = (ta.value || "").trim();
+    const ocrRaw = String(msLastOcrRaw[targetId] || "").trim();
+    if (!current && !ocrRaw) {
+      showToast("未有評分點文字可排");
+      return;
+    }
+    const source = current || ocrRaw;
+    const btn = $(targetId === "qb-ms" ? "qb-ms-ai-arrange" : "t-scheme-ai-arrange");
+    if (btn) btn.disabled = true;
+    showToast("排緊…");
+    const messages = [
+      { role: "system", content: buildMsArrangeSystemPrompt() },
+      { role: "user", content: buildMsArrangeUserMessage(source, ocrRaw) },
+    ];
+    try {
+      const result = await callGrokForMsArrange(messages);
+      if (!result || !result.ok) {
+        applyMsArrangeLocalFallback(targetId, source, "未連 AI，用本機重排");
+        return;
+      }
+      const tableText = extractMsTableFromAiContent(result.content);
+      let grid = parseMsTableText(tableText);
+      if (!grid || !grid[0] || grid[0].length !== 2) {
+        grid = forceBuildMs2ColGrid(tableText);
+      }
+      if (!grid) {
+        applyMsArrangeLocalFallback(targetId, source, "失敗：AI 輸出無效，改用本機重排");
+        return;
+      }
+      if (!applyMsArrangeGrid(targetId, grid, "已排好")) {
+        applyMsArrangeLocalFallback(targetId, source, "失敗：改用本機重排");
+      }
+    } catch (err) {
+      applyMsArrangeLocalFallback(targetId, source, "失敗：改用本機重排");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function wireMsTableEditors() {
     Object.keys(MS_TABLE_MAP).forEach((targetId) => {
       const meta = MS_TABLE_MAP[targetId];
@@ -5771,7 +5949,12 @@
       if (!toolbar) return;
       toolbar.querySelectorAll("[data-ms-act]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          msTableMutate(targetId, btn.getAttribute("data-ms-act"));
+          const act = btn.getAttribute("data-ms-act");
+          if (act === "ai-arrange") {
+            runMsAiArrange(targetId);
+            return;
+          }
+          msTableMutate(targetId, act);
         });
       });
       const ta = $(targetId);
@@ -5904,6 +6087,7 @@
         }
         target.dispatchEvent(new Event("input", { bubbles: true }));
         if (cfg.tableAware && MS_TABLE_MAP[cfg.targetId]) {
+          msLastOcrRaw[cfg.targetId] = textOut;
           const det = applyOcrMsTableHeuristic(cfg.targetId, textOut, replace, { forceTable: !!forceTable });
           if (det.table && det.forced) {
             setOcrStatus(status, "完成 — 未能自動對齊欄位，已強制建成表格＋文字（請核對）", "ok");
