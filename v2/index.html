@@ -5195,19 +5195,6 @@
     return false;
   }
 
-  /** True only when the entire cell is footer noise, not a point that mentions those words. */
-  function isWholeCellMsNoise(s) {
-    const t = String(s || "").trim();
-    if (!t) return false;
-    if (/^[DS]\s*$/i.test(t) || /^[DS]\s*[=＝]/.test(t)) return true;
-    if (/^Q?\s*\d{1,3}[\.、．]\s*$/i.test(t) || /^\d{1,3}\s*$/.test(t)) return true;
-    if (/^(溝通|清晰|有條理|系統)$/.test(t)) return true;
-    if (/^communication$/i.test(t) || /^total\s*marks?$/i.test(t)) return true;
-    if (/^C\s*[=＝]/.test(t)) return true;
-    if (/^(最高\s*\d+|共\s*\d+\s*分|\d+\s*分)$/.test(t)) return true;
-    return false;
-  }
-
   /** Merge OCR mid-sentence fragments that do not end with (n) into the previous item. */
   function mergeBrokenMsPlainItems(items) {
     const out = [];
@@ -5345,27 +5332,10 @@
     return null;
   }
 
-  function isMdSeparatorLine(line) {
-    let t = String(line || "").trim().replace(/｜/g, "|");
-    if (t.indexOf("|") < 0) return false;
-    const parts = t.split("|").map((p) => p.trim()).filter((p) => p !== "");
-    return parts.length >= 2 && parts.every((p) => /^:?-{2,}:?$/.test(p));
-  }
-
-  /** Drop plain OCR noise and separator rows. Keep a pipe row that still has a real point. */
-  function shouldDropMsSourceLine(line) {
-    if (isMdSeparatorLine(line)) return true;
-    const cells = splitMsRow(line);
-    if (cells && cells.length >= 2) {
-      return cells.every((c) => !String(c || "").trim() || isWholeCellMsNoise(c));
-    }
-    return isMsNoiseLine(line);
-  }
-
   function parseMsTableTextClassic(lines) {
     const rows = [];
     for (const line of lines) {
-      if (shouldDropMsSourceLine(line)) continue; // skip footer / q-number / separator lines
+      if (isMsNoiseLine(line)) continue; // skip footer / q-number / communication lines
       const cells = splitMsRow(line);
       if (!cells || cells.length < 2) {
         // non-footer non-table after rows started → fail closed
@@ -5449,7 +5419,7 @@
 
     const allLines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const hints = extractMsFooterColHints(raw);
-    const content = allLines.filter((l) => !shouldDropMsSourceLine(l));
+    const content = allLines.filter((l) => !isMsNoiseLine(l));
     if (content.length < 1) return null;
 
     const detected = detectDse2ColHeaders(raw);
@@ -5525,18 +5495,51 @@
     return rows.length >= 2 ? rows : null;
   }
 
+  /** True when text has no real CJK / Latin / digit content (hollow | pipes only, whitespace, etc.). */
+  function isHollowMsText(text) {
+    const s = String(text == null ? "" : text);
+    if (!s.trim()) return true;
+    // Strip common table chrome then look for substance
+    const stripped = s
+      .replace(/\|/g, " ")
+      .replace(/｜/g, " ")
+      .replace(/[-–—:：]+/g, " ")
+      .replace(/\s+/g, "");
+    if (!stripped) return true;
+    return !/[\u4e00-\u9fffA-Za-z0-9]/.test(stripped);
+  }
+
+  function isHollowMsGrid(grid) {
+    if (!grid || !grid.length) return true;
+    // Ignore header row if it looks like DSE 2-col headers
+    let start = 0;
+    if (grid[0] && grid[0].length === 2 && isDse2ColHeaderRow(grid[0])) start = 1;
+    let any = false;
+    for (let i = start; i < grid.length; i++) {
+      const row = grid[i] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] == null ? "" : row[c]).trim();
+        if (cell && !isMsNoiseLine(cell) && /[\u4e00-\u9fffA-Za-z0-9]/.test(cell)) {
+          any = true;
+          break;
+        }
+      }
+      if (any) break;
+    }
+    return !any;
+  }
+
   function forceBuildMs2ColGrid(text) {
     const raw = String(text || "").replace(/\u00a0/g, " ").trim();
     if (!raw) return null;
     // Always aim for real DSE Paper 1B Q11 2-col layout
     const rebuilt = rebuildDse2ColMsTable(raw, { force: true });
-    if (rebuilt && rebuilt.length >= 2) return rebuilt;
+    if (rebuilt && rebuilt.length >= 2 && !isHollowMsGrid(rebuilt)) return rebuilt;
 
     const detected = detectDse2ColHeaders(raw);
     const hints = extractMsFooterColHints(raw);
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      .filter((l) => !shouldDropMsSourceLine(l));
-    if (!lines.length) return null;
+      .filter((l) => !isMsNoiseLine(l));
 
     const plain = [];
     const mixed = [];
@@ -5544,8 +5547,12 @@
       if (looksLikeMsHeaderLine(line) && line.length <= 24) continue;
       const split = splitMsRow(line);
       if (split && split.length >= 2) {
+        const left = stripMsBullet(split[0]);
+        const right = stripMsBullet(split.slice(1).join(" "));
+        // Skip fully empty pipe rows (hollow | | |)
+        if (!left && !right) continue;
         flushMsPlainPairs(plain, mixed, hints);
-        mixed.push([stripMsBullet(split[0]), stripMsBullet(split.slice(1).join(" "))]);
+        mixed.push([left, right]);
       } else {
         plain.push(line);
       }
@@ -5554,8 +5561,33 @@
     const grid = [[detected.left, detected.right]];
     if (mixed.length) {
       for (const r of mixed) grid.push(r);
-    } else {
-      grid.push(["", ""]);
+    }
+
+    // Last resort: any non-noise substance in raw → put remaining text in left column
+    if (grid.length < 2 || isHollowMsGrid(grid)) {
+      const leftover = raw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .filter((l) => !isMsNoiseLine(l))
+        .map((l) => {
+          const sp = splitMsRow(l);
+          if (sp && sp.length) return stripMsBullet(sp.filter(Boolean).join(" "));
+          return stripMsBullet(l);
+        })
+        .filter((l) => l && /[\u4e00-\u9fffA-Za-z0-9]/.test(l));
+      if (!leftover.length) {
+        // Hollow-only / all-noise: no usable text
+        return null;
+      }
+      // Reset to header + one cell per leftover chunk
+      grid.length = 0;
+      grid.push([detected.left, detected.right]);
+      for (const chunk of leftover) {
+        if (looksLikeMsHeaderLine(chunk) && chunk.length <= 24) continue;
+        grid.push([chunk, ""]);
+      }
+      if (grid.length < 2) grid.push([leftover[0], ""]);
     }
     return grid;
   }
@@ -5847,6 +5879,7 @@
     return msg;
   }
 
+
   function extractMsTableFromAiContent(content) {
     let t = String(content || "").trim();
     t = t.replace(/^```(?:markdown|md|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -5871,16 +5904,17 @@
     if (!meta || !ta || !host || !grid || !grid.length) return false;
     let g = grid.map((r) => (r || []).slice());
     if (!g[0] || g[0].length !== 2) return false;
-    // Drop a cell only when the whole cell is footer noise (D=, 溝通, 11.).
-    // Keep a marking point that merely contains words like 系統.
+    // Drop any residual D/S noise that slipped into cells
     g = g.map((row) => row.map((c) => {
       const s = String(c == null ? "" : c).trim();
-      return isWholeCellMsNoise(s) ? "" : s;
+      if (isMsNoiseLine(s) || /^[DS]\s*[=＝]/.test(s)) return "";
+      return s;
     }));
     if (!isDse2ColHeaderRow(g[0])) {
       const detected = detectDse2ColHeaders(serializeMsGrid(g) + "\n" + (ta.value || ""));
       g = [[detected.left, detected.right]].concat(g);
     }
+    if (isHollowMsGrid(g)) return false;
     host.setAttribute("data-ms-target", targetId);
     renderMsEditTable(host, g);
     const serialized = serializeMsGrid(g);
@@ -5893,7 +5927,7 @@
 
   function applyMsArrangeLocalFallback(targetId, source, toastMsg) {
     const grid = forceBuildMs2ColGrid(source);
-    if (!grid) {
+    if (!grid || isHollowMsGrid(grid)) {
       showToast("失敗：本機重排亦唔得");
       return false;
     }
@@ -5930,11 +5964,16 @@
     if (!ta) return;
     const current = (ta.value || "").trim();
     const ocrRaw = String(msLastOcrRaw[targetId] || "").trim();
-    if (!current && !ocrRaw) {
+    const currentHollow = isHollowMsText(current);
+    const ocrHollow = isHollowMsText(ocrRaw);
+    // Prefer OCR raw when textarea is empty or only hollow | pipes
+    let source = "";
+    if (!currentHollow) source = current;
+    else if (!ocrHollow) source = ocrRaw;
+    else {
       showToast("未有評分點文字可排");
       return;
     }
-    const source = current || ocrRaw;
     const btn = $(targetId === "qb-ms" ? "qb-ms-ai-arrange" : "t-scheme-ai-arrange");
     if (btn) btn.disabled = true;
     showToast("排緊…");
@@ -5949,19 +5988,26 @@
         return;
       }
       const tableText = extractMsTableFromAiContent(result.content);
-      let grid = parseMsTableText(tableText);
-      if (!grid || !grid[0] || grid[0].length !== 2) {
-        grid = forceBuildMs2ColGrid(tableText);
+      let grid = null;
+      if (!isHollowMsText(tableText)) {
+        grid = parseMsTableText(tableText);
+        if (!grid || !grid[0] || grid[0].length !== 2 || isHollowMsGrid(grid)) {
+          grid = forceBuildMs2ColGrid(tableText);
+        }
       }
-      if (!grid) {
-        applyMsArrangeLocalFallback(targetId, source, "失敗：AI 輸出無效，改用本機重排");
+      // Discard hollow AI output — rebuild from OCR raw / source
+      if (!grid || isHollowMsGrid(grid)) {
+        const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：AI 輸出無效，改用本機重排");
         return;
       }
       if (!applyMsArrangeGrid(targetId, grid, "已排好")) {
-        applyMsArrangeLocalFallback(targetId, source, "失敗：改用本機重排");
+        const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：改用本機重排");
       }
     } catch (err) {
-      applyMsArrangeLocalFallback(targetId, source, "失敗：改用本機重排");
+      const fallbackSrc = !ocrHollow ? ocrRaw : source;
+      applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：改用本機重排");
     } finally {
       if (btn) btn.disabled = false;
     }
