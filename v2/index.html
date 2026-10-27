@@ -1320,7 +1320,7 @@
       </div>
 
 
-      <!-- 隱藏答案欄：由「最後學生答案」五段組裝同步 -->
+      <!-- 隱藏答案欄：由「最後學生答案」完整答文同步 -->
       <textarea id="s-answer" hidden aria-hidden="true"></textarea>
 
       <div class="card" id="s-submit-card">
@@ -1352,27 +1352,25 @@
       <div class="card final-locked" id="s-final-card" aria-labelledby="s-final-heading">
         <h2 id="s-final-heading"><span class="num">4</span> 最後學生答案</h2>
         <p id="s-final-gate-msg" class="final-gate-msg">請先完成細題、自評表，並提交／交卷，先至可寫最後答案。</p>
-        <p id="s-final-ok-msg" class="final-unlocked-msg" hidden>已解鎖：可以寫最後答案各段，完成後按「提交最後答案」。</p>
+        <p id="s-final-ok-msg" class="final-unlocked-msg" hidden>已解鎖：喺下面一大格寫完整答文（亦可上載答卷相片 OCR），完成後按「提交最後答案」。</p>
+        <p class="hint" style="margin-top:-0.25rem;margin-bottom:0.65rem;">解鎖後喺一大格寫完整答文；亦可上載答卷相片 OCR。</p>
         <div class="final-fields" id="s-final-fields">
           <div class="field">
-            <label for="s-final-understanding">1. 題旨理解（你對題目要求嘅理解）</label>
-            <textarea id="s-final-understanding" rows="3" placeholder="一句：題目要求機制／比較／利弊／條件？" disabled></textarea>
-          </div>
-          <div class="field">
-            <label for="s-final-points">2. 按評分點／細題作答要點</label>
-            <textarea id="s-final-points" class="tall mono" rows="8" placeholder="按細題／評分點寫你嘅作答要點…" disabled></textarea>
-          </div>
-          <div class="field">
-            <label for="s-final-score">3. 估計自己得分（可選）</label>
-            <textarea id="s-final-score" rows="2" placeholder="例如：估計 6／8（內容）…" disabled></textarea>
-          </div>
-          <div class="field">
-            <label for="s-final-gaps">4. 你覺得最大漏點</label>
-            <textarea id="s-final-gaps" rows="4" placeholder="列出最多三個你覺得最影響得分嘅漏點…" disabled></textarea>
-          </div>
-          <div class="field">
-            <label for="s-final-improve">5. 你會點改／完整答文要點</label>
-            <textarea id="s-final-improve" rows="5" placeholder="用 bullet 寫完整答文要點或改寫方向…" disabled></textarea>
+            <label for="s-final-essay">完整答文</label>
+            <textarea id="s-final-essay" class="tall" rows="14" placeholder="喺呢度寫完整 essay／長答……亦可下面上載答卷相片轉文字。" disabled></textarea>
+            <div class="ocr-box" data-ocr="s-final-essay">
+              <div class="ocr-title">上載答卷相片／截圖 → OCR 轉文字</div>
+              <div class="ocr-row">
+                <input type="file" id="s-final-ocr-file" accept="image/*" />
+                <input type="file" id="s-final-ocr-cam" accept="image/*" capture="environment" />
+                <button type="button" class="btn btn-secondary btn-sm" id="s-final-ocr-pick" disabled>選擇相片</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="s-final-ocr-camera" disabled>用相機</button>
+                <button type="button" class="btn btn-primary btn-sm" id="s-final-ocr-run" disabled>開始轉文字</button>
+              </div>
+              <label class="ocr-replace"><input type="checkbox" id="s-final-ocr-replace" checked /> 轉完清空再填</label>
+              <div class="ocr-preview-wrap"><img id="s-final-ocr-preview" class="ocr-preview" alt="預覽" hidden /></div>
+              <p id="s-final-ocr-status" class="ocr-status">待命</p>
+            </div>
           </div>
           <div class="actions">
             <button type="button" class="btn btn-primary" id="s-final-submit" disabled>提交最後答案</button>
@@ -2108,11 +2106,10 @@
     sFinalFields: $("s-final-fields"),
     sFinalGateMsg: $("s-final-gate-msg"),
     sFinalOkMsg: $("s-final-ok-msg"),
-    sFinalUnderstanding: $("s-final-understanding"),
-    sFinalPoints: $("s-final-points"),
-    sFinalScore: $("s-final-score"),
-    sFinalGaps: $("s-final-gaps"),
-    sFinalImprove: $("s-final-improve"),
+    sFinalEssay: $("s-final-essay"),
+    sFinalOcrPick: $("s-final-ocr-pick"),
+    sFinalOcrCamera: $("s-final-ocr-camera"),
+    sFinalOcrRun: $("s-final-ocr-run"),
     sFinalSubmit: $("s-final-submit"),
     sFinalSync: $("s-final-sync"),
     sFinalStatus: $("s-final-status"),
@@ -2283,11 +2280,7 @@
         ppTable: getPpTableState(),
         finalAnswerUnlocked: !!finalAnswerUnlocked,
         finalAnswer: {
-          understanding: (els.sFinalUnderstanding && els.sFinalUnderstanding.value) || "",
-          points: (els.sFinalPoints && els.sFinalPoints.value) || "",
-          score: (els.sFinalScore && els.sFinalScore.value) || "",
-          gaps: (els.sFinalGaps && els.sFinalGaps.value) || "",
-          improve: (els.sFinalImprove && els.sFinalImprove.value) || "",
+          essay: (els.sFinalEssay && els.sFinalEssay.value) || "",
         },
       },
       teacher: {
@@ -3462,9 +3455,7 @@
     packageText = "";
     if (els.sPackage) els.sPackage.textContent = "提交後會顯示規劃摘要；亦可先按「產生規劃稿」預覽。";
     if (els.sCopy) els.sCopy.disabled = true;
-    [els.sFinalUnderstanding, els.sFinalPoints, els.sFinalScore, els.sFinalGaps, els.sFinalImprove].forEach((el) => {
-      if (el) el.value = "";
-    });
+    if (els.sFinalEssay) els.sFinalEssay.value = "";
     scheduleSave();
     syncAssembledAnswerFromFinal();
     updateFinalAnswerGate();
@@ -3679,7 +3670,7 @@
       syncAssembledAnswerFromFinal();
       answerText = (els.sAnswer && els.sAnswer.value || "").trim();
       if (!answerText) {
-        showToast("請先填最後學生答案各段");
+        showToast("請先寫最後學生答案（完整答文）");
         return null;
       }
     }
@@ -4132,18 +4123,7 @@
   }
 
   function assembleFinalAnswerText() {
-    const parts = [];
-    const u = (els.sFinalUnderstanding && els.sFinalUnderstanding.value || "").trim();
-    const p = (els.sFinalPoints && els.sFinalPoints.value || "").trim();
-    const s = (els.sFinalScore && els.sFinalScore.value || "").trim();
-    const g = (els.sFinalGaps && els.sFinalGaps.value || "").trim();
-    const im = (els.sFinalImprove && els.sFinalImprove.value || "").trim();
-    if (u) { parts.push("1. 題旨理解"); parts.push(u); parts.push(""); }
-    if (p) { parts.push("2. 按評分點／細題作答要點"); parts.push(p); parts.push(""); }
-    if (s) { parts.push("3. 估計自己得分"); parts.push(s); parts.push(""); }
-    if (g) { parts.push("4. 你覺得最大漏點"); parts.push(g); parts.push(""); }
-    if (im) { parts.push("5. 你會點改／完整答文要點"); parts.push(im); }
-    return parts.join("\n").trim();
+    return ((els.sFinalEssay && els.sFinalEssay.value) || "").trim();
   }
 
   function syncAssembledAnswerFromFinal() {
@@ -4166,11 +4146,10 @@
     }
     if (els.sFinalGateMsg) els.sFinalGateMsg.hidden = unlocked;
     if (els.sFinalOkMsg) els.sFinalOkMsg.hidden = !unlocked;
-    const fields = [
-      els.sFinalUnderstanding, els.sFinalPoints, els.sFinalScore,
-      els.sFinalGaps, els.sFinalImprove,
-    ];
-    fields.forEach((el) => { if (el) el.disabled = !unlocked; });
+    if (els.sFinalEssay) els.sFinalEssay.disabled = !unlocked;
+    [els.sFinalOcrPick, els.sFinalOcrCamera].forEach((el) => { if (el) el.disabled = !unlocked; });
+    // run stays disabled until a photo is chosen; re-enable only when unlocked + file already selected via bindOcrWidget
+    if (els.sFinalOcrRun && !unlocked) els.sFinalOcrRun.disabled = true;
     if (els.sFinalSubmit) els.sFinalSubmit.disabled = !unlocked;
     if (els.sFinalSync) els.sFinalSync.disabled = !unlocked;
     // soft tip when PT/SC ready but not yet submitted
@@ -5099,12 +5078,11 @@
     els.sQuestion, els.sAnswer,
     els.tQuestion, els.tScheme, els.tAnswer,
     els.tFbUnderstanding, els.tFbPoints, els.tFbScore, els.tFbGaps, els.tFbImprove,
-    els.sFinalUnderstanding, els.sFinalPoints, els.sFinalScore, els.sFinalGaps, els.sFinalImprove,
+    els.sFinalEssay,
   ].forEach((el) => {
     if (!el) return;
     el.addEventListener("input", () => {
-      if (el === els.sFinalUnderstanding || el === els.sFinalPoints || el === els.sFinalScore ||
-          el === els.sFinalGaps || el === els.sFinalImprove) {
+      if (el === els.sFinalEssay) {
         syncAssembledAnswerFromFinal();
       }
       scheduleSave();
@@ -5610,8 +5588,21 @@
     tableAware: true,
   });
 
+  bindOcrWidget({
+    targetId: "s-final-essay",
+    fileId: "s-final-ocr-file",
+    camId: "s-final-ocr-cam",
+    pickId: "s-final-ocr-pick",
+    cameraBtnId: "s-final-ocr-camera",
+    runId: "s-final-ocr-run",
+    replaceId: "s-final-ocr-replace",
+    previewId: "s-final-ocr-preview",
+    statusId: "s-final-ocr-status",
+    toastMsg: "已轉文字並填入最後答案",
+  });
+
   if (window.__tesseractLoadFailed || (document.readyState === "complete" && !tesseractReady())) {
-    ["qb-q-ocr-status", "qb-ms-ocr-status", "t-ms-ocr-status"].forEach((id) => {
+    ["qb-q-ocr-status", "qb-ms-ocr-status", "t-ms-ocr-status", "s-final-ocr-status"].forEach((id) => {
       const el = $(id);
       if (el && el.textContent === "待命") {
         setOcrStatus(el, "提示：若 CDN 被擋，可改喺 Grok Bot 對話直接傳相 OCR", null);
@@ -5620,7 +5611,7 @@
   }
   window.addEventListener("load", () => {
     if (!tesseractReady()) {
-      ["qb-q-ocr-status", "qb-ms-ocr-status", "t-ms-ocr-status"].forEach((id) => {
+      ["qb-q-ocr-status", "qb-ms-ocr-status", "t-ms-ocr-status", "s-final-ocr-status"].forEach((id) => {
         const el = $(id);
         if (el) setOcrStatus(el, "離線／被擋 CDN 時可改喺 Grok Bot 對話直接傳相 OCR", "err");
       });
@@ -6005,11 +5996,16 @@
       }
       if (data.student.finalAnswer && typeof data.student.finalAnswer === "object") {
         const fa = data.student.finalAnswer;
-        if (els.sFinalUnderstanding) els.sFinalUnderstanding.value = fa.understanding || "";
-        if (els.sFinalPoints) els.sFinalPoints.value = fa.points || "";
-        if (els.sFinalScore) els.sFinalScore.value = fa.score || "";
-        if (els.sFinalGaps) els.sFinalGaps.value = fa.gaps || "";
-        if (els.sFinalImprove) els.sFinalImprove.value = fa.improve || "";
+        let essay = (fa.essay != null) ? String(fa.essay) : "";
+        if (!essay.trim()) {
+          // migrate legacy five-section drafts into one essay box
+          const legacy = [fa.understanding, fa.points, fa.score, fa.gaps, fa.improve]
+            .map((x) => String(x || "").trim())
+            .filter(Boolean);
+          essay = legacy.join("\n\n");
+        }
+        if (els.sFinalEssay) els.sFinalEssay.value = essay;
+        syncAssembledAnswerFromFinal();
       }
       finalAnswerUnlocked = !!data.student.finalAnswerUnlocked;
     } else {
