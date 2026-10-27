@@ -496,6 +496,15 @@
       font-size: 0.8rem;
       color: var(--text-muted);
     }
+    .ms-ai-arrange-status {
+      margin: 0.3rem 0 0;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      min-height: 1.1em;
+    }
+    .ms-ai-arrange-status.is-busy { color: var(--accent); }
+    .ms-ai-arrange-status.is-ok { color: var(--ok); }
+    .ms-ai-arrange-status.is-err { color: var(--danger); }
 
     /* Point-planning table */
     .pt-box {
@@ -1338,7 +1347,7 @@
 
           <div class="sc-linked" id="s-sc-linked" aria-labelledby="s-sc-heading">
             <h3 id="s-sc-heading">自評表（跟 Point Table 細題）</h3>
-            <p class="hint" style="margin:0 0 0.65rem;">拆完細題後，每條細題下面可加「評分點」列：勾已中、寫「我寫咗咩／要點點改」。資料存 localStorage。</p>
+            <p class="hint" style="margin:0 0 0.65rem;">拆完細題後，每條細題下面可加「評分點」列：勾「已中」即可。資料存 localStorage。</p>
             <div id="s-checklist" class="checklist" aria-label="按細題分組嘅自評評分點"></div>
             <div class="actions" style="margin-top:0.55rem;">
               <button type="button" class="btn btn-ghost btn-sm" id="s-reset-checklist">重設自評表</button>
@@ -1473,7 +1482,9 @@
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+                <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="qb-ms-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
               </div>
+              <p id="qb-ms-ai-arrange-status" class="ms-ai-arrange-status" role="status" aria-live="polite" hidden></p>
               <div id="qb-ms-table" class="ms-edit-table-host" data-ms-target="qb-ms" hidden></div>
               <p class="ms-table-hint">可插入可編輯表格（儲存時轉成 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
             </div>
@@ -1589,7 +1600,9 @@
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-row">刪列</button>
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="del-col">刪欄</button>
               <button type="button" class="btn btn-ghost btn-sm" data-ms-act="clear">清空表格</button>
+              <button type="button" class="btn btn-primary btn-sm" data-ms-act="ai-arrange" id="t-scheme-ai-arrange" title="用 AI 重排成 DSE 兩欄表格">AI 排好表格</button>
             </div>
+            <p id="t-scheme-ai-arrange-status" class="ms-ai-arrange-status" role="status" aria-live="polite" hidden></p>
             <div id="t-scheme-table" class="ms-edit-table-host" data-ms-target="t-scheme" hidden></div>
             <p class="ms-table-hint">可插入可編輯表格（載入評分點／儲存時用 | 分隔純文字）。亦可<strong>直接上載圖片</strong> OCR。</p>
           </div>
@@ -2244,7 +2257,7 @@
   let packageText = "";
   let markingPoints = []; // { id, text, status: 'hit'|'partial'|'miss'|'', reason: '' }
   let lastAiReport = "";
-  let selfCheckMap = {}; // subId -> [{ id, hit, point, wrote, fix }]
+  let selfCheckMap = {}; // subId -> [{ id, hit, point }] (wrote/fix kept empty for old-draft compat)
   let finalAnswerUnlocked = false; // session + localStorage gate for 最後學生答案
 
   let toastTimer = null;
@@ -3454,11 +3467,9 @@
       let any = false;
       ids.forEach((sid) => {
         (selfCheckMap[sid] || []).forEach((row) => {
-          if (!(row.point || row.wrote || row.fix || row.hit)) return;
+          if (!(row.point || row.hit)) return;
           any = true;
-          lines.push("- " + (row.hit ? "✅" : "☐") + " " + (row.point || "") +
-            (row.wrote ? "｜我寫咗：" + row.wrote : "") +
-            (row.fix ? "｜要改：" + row.fix : ""));
+          lines.push("- " + (row.hit ? "✅" : "☐") + " " + (row.point || ""));
         });
       });
       if (!any) lines.push("（尚未填自評）");
@@ -4146,7 +4157,7 @@
       const rows = selfCheckMap[ids[i]] || [];
       for (let j = 0; j < rows.length; j++) {
         const r = rows[j];
-        if ((r.point || "").trim() || (r.wrote || "").trim() || (r.fix || "").trim() || r.hit) return true;
+        if ((r.point || "").trim() || r.hit) return true;
       }
     }
     return false;
@@ -4197,8 +4208,8 @@
   function maybeReseedSelfCheckForSub(sub) {
     if (!sub || !sub.id) return;
     const rows = Array.isArray(selfCheckMap[sub.id]) ? selfCheckMap[sub.id] : [];
-    const customized = rows.some((r) => (r.wrote || "").trim() || (r.fix || "").trim() || r.hit);
-    if (customized) return; // keep user hit/wrote/fix
+    const customized = rows.some((r) => r.hit);
+    if (customized) return; // keep user hit
     const seeded = pointsFromSubText(sub.points);
     selfCheckMap[sub.id] = seeded.length ? seeded : [emptyPointRow()];
   }
@@ -4288,23 +4299,7 @@
         pIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 評分點 " + (idx + 1));
         pIn.addEventListener("input", () => { row.point = pIn.value; scheduleSave(); updateFinalAnswerGate(); });
 
-        const wIn = document.createElement("input");
-        wIn.type = "text";
-        wIn.placeholder = "我寫咗咩";
-        wIn.value = row.wrote || "";
-        wIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 我寫咗咩 " + (idx + 1));
-        wIn.addEventListener("input", () => { row.wrote = wIn.value; scheduleSave(); });
-
-        const fIn = document.createElement("input");
-        fIn.type = "text";
-        fIn.placeholder = "要點點改";
-        fIn.value = row.fix || "";
-        fIn.setAttribute("aria-label", "細題" + (sIdx + 1) + " 要點點改 " + (idx + 1));
-        fIn.addEventListener("input", () => { row.fix = fIn.value; scheduleSave(); });
-
         fields.appendChild(pIn);
-        fields.appendChild(wIn);
-        fields.appendChild(fIn);
 
         const del = document.createElement("button");
         del.type = "button";
@@ -4710,9 +4705,7 @@
             chunks.push(
               "- (" + sid + "#" + (j + 1) + ") " +
               (row.hit ? "已中" : "未中") + "｜" +
-              (row.point || "") +
-              (row.wrote ? "｜我寫咗：" + row.wrote : "") +
-              (row.fix ? "｜要改：" + row.fix : "")
+              (row.point || "")
             );
           });
         });
@@ -5159,6 +5152,8 @@
     "qb-ms": { hostId: "qb-ms-table", toolbarId: "qb-ms-table-toolbar" },
     "t-scheme": { hostId: "t-scheme-table", toolbarId: "t-scheme-table-toolbar" },
   };
+  /** Recent raw OCR text per MS target (qb-ms / t-scheme), for AI rearrange. */
+  const msLastOcrRaw = {};
 
   function msEscapeCell(s) {
     return String(s == null ? "" : s).replace(/\s*\|\s*/g, "／").replace(/\r?\n/g, " ").trim();
@@ -5175,7 +5170,7 @@
   function isMsFooterLine(line) {
     const t = String(line || "").trim();
     if (!t) return false;
-    return /溝通|Communication|^\s*D\s*=|^\s*S\s*=|最高\s*\d|共\s*\d+\s*分|\d+\s*分\s*$|C\s*=|清晰|有條理|系統/.test(t);
+    return /溝通|Communication|^\s*D\s*[=＝]|^\s*S\s*[=＝]|最高\s*\d|共\s*\d+\s*分|\d+\s*分\s*$|C\s*[=＝]|清晰|有條理|系統|total\s*marks?/i.test(t);
   }
 
   function isMsNoiseLine(line) {
@@ -5185,7 +5180,36 @@
     // bare question numbers beside the table (e.g. "11.")
     if (/^Q?\s*\d{1,3}[\.、．]\s*$/i.test(t)) return true;
     if (/^\d{1,3}\s*$/.test(t)) return true;
+    // never put lone D / S (or D=/S= fragments) into cells
+    if (/^[DS]\s*$/i.test(t)) return true;
+    if (/^[DS]\s*[=＝]/.test(t)) return true;
     return false;
+  }
+
+  /** Merge OCR mid-sentence fragments that do not end with (n) into the previous item. */
+  function mergeBrokenMsPlainItems(items) {
+    const out = [];
+    for (const raw of items) {
+      let line = stripMsBullet(raw);
+      if (!line || isMsNoiseLine(line)) continue;
+      if (/^[DS]\s*[=＝]/.test(line)) continue;
+      if (!out.length) {
+        out.push(line);
+        continue;
+      }
+      const prev = out[out.length - 1];
+      // incomplete previous body cell → glue this fragment on (never glue onto headers)
+      if (
+        !endsWithMsMarkToken(prev) &&
+        !looksLikeMsHeaderLine(prev) &&
+        !looksLikeMsHeaderLine(line)
+      ) {
+        out[out.length - 1] = (prev + " " + line).replace(/\s+/g, " ").trim();
+      } else {
+        out.push(line);
+      }
+    }
+    return out;
   }
 
   const MS_LEFT_HEADER_RE = /相同|相異|不同|比較|差異|優點|缺點|利弊|相似/;
@@ -5337,7 +5361,7 @@
    */
   function flushMsPlainPairs(plain, out, hints) {
     if (!plain.length) return;
-    const items = plain.map(stripMsBullet).filter(Boolean);
+    const items = mergeBrokenMsPlainItems(plain);
     plain.length = 0;
     const markish = items.filter(endsWithMsMarkToken).length;
     const preferPair = markish >= Math.ceil(items.length / 2) || items.length >= 2;
@@ -5462,18 +5486,51 @@
     return rows.length >= 2 ? rows : null;
   }
 
+  /** True when text has no real CJK / Latin / digit content (hollow | pipes only, whitespace, etc.). */
+  function isHollowMsText(text) {
+    const s = String(text == null ? "" : text);
+    if (!s.trim()) return true;
+    // Strip common table chrome then look for substance
+    const stripped = s
+      .replace(/\|/g, " ")
+      .replace(/｜/g, " ")
+      .replace(/[-–—:：]+/g, " ")
+      .replace(/\s+/g, "");
+    if (!stripped) return true;
+    return !/[\u4e00-\u9fffA-Za-z0-9]/.test(stripped);
+  }
+
+  function isHollowMsGrid(grid) {
+    if (!grid || !grid.length) return true;
+    // Ignore header row if it looks like DSE 2-col headers
+    let start = 0;
+    if (grid[0] && grid[0].length === 2 && isDse2ColHeaderRow(grid[0])) start = 1;
+    let any = false;
+    for (let i = start; i < grid.length; i++) {
+      const row = grid[i] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] == null ? "" : row[c]).trim();
+        if (cell && !isMsNoiseLine(cell) && /[\u4e00-\u9fffA-Za-z0-9]/.test(cell)) {
+          any = true;
+          break;
+        }
+      }
+      if (any) break;
+    }
+    return !any;
+  }
+
   function forceBuildMs2ColGrid(text) {
     const raw = String(text || "").replace(/\u00a0/g, " ").trim();
     if (!raw) return null;
     // Always aim for real DSE Paper 1B Q11 2-col layout
     const rebuilt = rebuildDse2ColMsTable(raw, { force: true });
-    if (rebuilt && rebuilt.length >= 2) return rebuilt;
+    if (rebuilt && rebuilt.length >= 2 && !isHollowMsGrid(rebuilt)) return rebuilt;
 
     const detected = detectDse2ColHeaders(raw);
     const hints = extractMsFooterColHints(raw);
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
       .filter((l) => !isMsNoiseLine(l));
-    if (!lines.length) return null;
 
     const plain = [];
     const mixed = [];
@@ -5481,8 +5538,12 @@
       if (looksLikeMsHeaderLine(line) && line.length <= 24) continue;
       const split = splitMsRow(line);
       if (split && split.length >= 2) {
+        const left = stripMsBullet(split[0]);
+        const right = stripMsBullet(split.slice(1).join(" "));
+        // Skip fully empty pipe rows (hollow | | |)
+        if (!left && !right) continue;
         flushMsPlainPairs(plain, mixed, hints);
-        mixed.push([stripMsBullet(split[0]), stripMsBullet(split.slice(1).join(" "))]);
+        mixed.push([left, right]);
       } else {
         plain.push(line);
       }
@@ -5491,8 +5552,33 @@
     const grid = [[detected.left, detected.right]];
     if (mixed.length) {
       for (const r of mixed) grid.push(r);
-    } else {
-      grid.push(["", ""]);
+    }
+
+    // Last resort: any non-noise substance in raw → put remaining text in left column
+    if (grid.length < 2 || isHollowMsGrid(grid)) {
+      const leftover = raw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .filter((l) => !isMsNoiseLine(l))
+        .map((l) => {
+          const sp = splitMsRow(l);
+          if (sp && sp.length) return stripMsBullet(sp.filter(Boolean).join(" "));
+          return stripMsBullet(l);
+        })
+        .filter((l) => l && /[\u4e00-\u9fffA-Za-z0-9]/.test(l));
+      if (!leftover.length) {
+        // Hollow-only / all-noise: no usable text
+        return null;
+      }
+      // Reset to header + one cell per leftover chunk
+      grid.length = 0;
+      grid.push([detected.left, detected.right]);
+      for (const chunk of leftover) {
+        if (looksLikeMsHeaderLine(chunk) && chunk.length <= 24) continue;
+        grid.push([chunk, ""]);
+      }
+      if (grid.length < 2) grid.push([leftover[0], ""]);
     }
     return grid;
   }
@@ -5762,6 +5848,228 @@
     if (typeof scheduleSave === "function") scheduleSave();
   }
 
+
+  function buildMsArrangeSystemPrompt() {
+    return [
+      "你係 HKDSE 生物 Paper 1B 論述題 mark scheme 表格整理助手。",
+      "只輸出一個 markdown／pipe 兩欄表格，唔好加解釋、前言、後記，亦唔好用 code fence。",
+      "規則：",
+      "1. 第一列（表頭）必須係「相異之處|意義／重要性」或「相同之處|意義／重要性」（按內容判斷）。",
+      "2. 之後每一列一個評分點：左欄差異／相同之處，右欄意義／重要性；保留 (1) 等分數標記。",
+      "3. 合理配對左右欄（差異對應其意義）。",
+      "4. 排除頁腳同雜訊：D=、S=、溝通、最高、總分／total marks、光禿題號（如 11.）。",
+      "5. 唔好發明評分點；只重整 OCR／現有文字。空白格用空字串。",
+    ].join("\n");
+  }
+
+  function buildMsArrangeUserMessage(currentText, ocrRaw) {
+    let msg = "請將以下 messy mark scheme 重排成乾淨兩欄表格。\n\n【目前文字／表格】\n" + String(currentText || "");
+    if (ocrRaw && String(ocrRaw).trim() && String(ocrRaw).trim() !== String(currentText || "").trim()) {
+      msg += "\n\n【近期 OCR 原文（參考）】\n" + String(ocrRaw).trim();
+    }
+    return msg;
+  }
+
+
+  function extractMsTableFromAiContent(content) {
+    let t = String(content || "").trim();
+    t = t.replace(/^```(?:markdown|md|text)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const lines = t.split(/\r?\n/);
+    const tableLines = [];
+    let started = false;
+    for (const line of lines) {
+      if (String(line).indexOf("|") >= 0) {
+        started = true;
+        tableLines.push(line);
+      } else if (started) {
+        break;
+      }
+    }
+    return tableLines.length ? tableLines.join("\n") : t;
+  }
+
+  function applyMsArrangeGrid(targetId, grid, toastMsg) {
+    const meta = MS_TABLE_MAP[targetId];
+    const ta = $(targetId);
+    const host = meta && $(meta.hostId);
+    if (!meta || !ta || !host || !grid || !grid.length) return false;
+    let g = grid.map((r) => (r || []).slice());
+    if (!g[0] || g[0].length !== 2) return false;
+    // Drop any residual D/S noise that slipped into cells
+    g = g.map((row) => row.map((c) => {
+      const s = String(c == null ? "" : c).trim();
+      if (isMsNoiseLine(s) || /^[DS]\s*[=＝]/.test(s)) return "";
+      return s;
+    }));
+    if (!isDse2ColHeaderRow(g[0])) {
+      const detected = detectDse2ColHeaders(serializeMsGrid(g) + "\n" + (ta.value || ""));
+      g = [[detected.left, detected.right]].concat(g);
+    }
+    if (isHollowMsGrid(g)) return false;
+    host.setAttribute("data-ms-target", targetId);
+    renderMsEditTable(host, g);
+    const serialized = serializeMsGrid(g);
+    ta.value = serialized;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    showToast(toastMsg || "已排好");
+    if (typeof scheduleSave === "function") scheduleSave();
+    return true;
+  }
+
+  function applyMsArrangeLocalFallback(targetId, source, toastMsg) {
+    const grid = forceBuildMs2ColGrid(source);
+    if (!grid || isHollowMsGrid(grid)) {
+      showToast("失敗：本機重排亦唔得");
+      return false;
+    }
+    return applyMsArrangeGrid(targetId, grid, toastMsg || "未連 AI，用本機重排");
+  }
+
+  function truncateMsAiErr(msg, maxLen) {
+    const s = String(msg || "").replace(/\s+/g, " ").trim();
+    const n = maxLen || 80;
+    if (!s) return "未知錯誤";
+    return s.length <= n ? s : (s.slice(0, n - 1) + "…");
+  }
+
+  function msAiArrangeStatusId(targetId) {
+    return targetId === "qb-ms" ? "qb-ms-ai-arrange-status" : "t-scheme-ai-arrange-status";
+  }
+
+  function setMsAiArrangeStatus(targetId, msg, kind) {
+    const el = $(msAiArrangeStatusId(targetId));
+    if (!el) return;
+    const text = String(msg || "").trim();
+    el.textContent = text;
+    el.hidden = !text;
+    el.classList.remove("is-busy", "is-ok", "is-err");
+    if (text && kind) el.classList.add("is-" + kind);
+  }
+
+  async function callGrokForMsArrange(messages) {
+    const settings = loadXaiSettings();
+    const keyFromUi = (els.tAiKey && els.tAiKey.value ? els.tAiKey.value : "").trim();
+    const apiKey = keyFromUi || settings.apiKey || "";
+    const model = ((els.tAiModel && els.tAiModel.value) || settings.model || XAI_DEFAULT_MODEL).trim();
+    const hasDirectCheckbox = !!(els.tAiDirect);
+    const directOptIn = hasDirectCheckbox ? !!els.tAiDirect.checked : !!apiKey;
+    const hasProxy = !!effectiveWebAppUrl();
+
+    if (hasDirectCheckbox && els.tAiDirect.checked && !apiKey) {
+      return { ok: false, needKey: true, error: "請先儲存／貼上 xAI API key" };
+    }
+    if (!hasProxy && !directOptIn) {
+      return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
+    }
+    if (directOptIn && !apiKey && !hasProxy) {
+      return { ok: false, needKey: true, error: "請先儲存／貼上 xAI API key" };
+    }
+    if (!hasProxy && !(directOptIn && apiKey)) {
+      return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
+    }
+
+    let result = null;
+    // Prefer direct first when user opted in (or page has a key) and key is present.
+    if (directOptIn && apiKey) {
+      result = await callGrokDirect(apiKey, model, messages);
+      if (result.ok) return result;
+      if (hasProxy) {
+        const proxyResult = await callGrokViaProxy(model, messages);
+        if (proxyResult.ok) return proxyResult;
+      }
+      return result;
+    }
+
+    if (hasProxy) {
+      result = await callGrokViaProxy(model, messages);
+      // Always fall back to direct after proxy fail when a key is available.
+      if (!result.ok && apiKey) {
+        result = await callGrokDirect(apiKey, model, messages);
+      }
+      return result;
+    }
+
+    return { ok: false, skipped: true, error: "未有代理／直接呼叫渠道" };
+  }
+
+  async function runMsAiArrange(targetId) {
+    const meta = MS_TABLE_MAP[targetId];
+    if (!meta) return;
+    ensureMsTextSynced(targetId);
+    const ta = $(targetId);
+    if (!ta) return;
+    const current = (ta.value || "").trim();
+    const ocrRaw = String(msLastOcrRaw[targetId] || "").trim();
+    const currentHollow = isHollowMsText(current);
+    const ocrHollow = isHollowMsText(ocrRaw);
+    // Prefer OCR raw when textarea is empty or only hollow | pipes
+    let source = "";
+    if (!currentHollow) source = current;
+    else if (!ocrHollow) source = ocrRaw;
+    else {
+      showToast("未有評分點文字可排");
+      setMsAiArrangeStatus(targetId, "未有評分點文字可排", "err");
+      return;
+    }
+    const btn = $(targetId === "qb-ms" ? "qb-ms-ai-arrange" : "t-scheme-ai-arrange");
+    if (btn) btn.disabled = true;
+    setMsAiArrangeStatus(targetId, "排緊…", "busy");
+    showToast("排緊…");
+    const messages = [
+      { role: "system", content: buildMsArrangeSystemPrompt() },
+      { role: "user", content: buildMsArrangeUserMessage(source, ocrRaw) },
+    ];
+    try {
+      const result = await callGrokForMsArrange(messages);
+      if (!result || !result.ok) {
+        if (result && result.needKey) {
+          const msg = "請先儲存／貼上 xAI API key";
+          showToast(msg);
+          setMsAiArrangeStatus(targetId, msg, "err");
+          applyMsArrangeLocalFallback(targetId, source, "未連 AI，用本機重排");
+          return;
+        }
+        const errShort = truncateMsAiErr(result && result.error, 80);
+        const toastMsg = (result && result.skipped)
+          ? "未連 AI，用本機重排"
+          : ("AI 失敗：" + errShort + "，用本機重排");
+        setMsAiArrangeStatus(targetId, errShort, "err");
+        applyMsArrangeLocalFallback(targetId, source, toastMsg);
+        return;
+      }
+      const tableText = extractMsTableFromAiContent(result.content);
+      let grid = null;
+      if (!isHollowMsText(tableText)) {
+        grid = parseMsTableText(tableText);
+        if (!grid || !grid[0] || grid[0].length !== 2 || isHollowMsGrid(grid)) {
+          grid = forceBuildMs2ColGrid(tableText);
+        }
+      }
+      // Discard hollow AI output — rebuild from OCR raw / source
+      if (!grid || isHollowMsGrid(grid)) {
+        const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        setMsAiArrangeStatus(targetId, "AI 輸出無效，改用本機重排", "err");
+        applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：AI 輸出無效，改用本機重排");
+        return;
+      }
+      if (!applyMsArrangeGrid(targetId, grid, "已排好")) {
+        const fallbackSrc = !ocrHollow ? ocrRaw : source;
+        setMsAiArrangeStatus(targetId, "套用失敗，改用本機重排", "err");
+        applyMsArrangeLocalFallback(targetId, fallbackSrc, "失敗：改用本機重排");
+      } else {
+        const via = result.via === "proxy" ? "代理" : "直接 xAI";
+        setMsAiArrangeStatus(targetId, "已排好（" + via + "）", "ok");
+      }
+    } catch (err) {
+      const fallbackSrc = !ocrHollow ? ocrRaw : source;
+      const errShort = truncateMsAiErr(err && err.message, 80);
+      setMsAiArrangeStatus(targetId, errShort, "err");
+      applyMsArrangeLocalFallback(targetId, fallbackSrc, "AI 失敗：" + errShort + "，用本機重排");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function wireMsTableEditors() {
     Object.keys(MS_TABLE_MAP).forEach((targetId) => {
       const meta = MS_TABLE_MAP[targetId];
@@ -5771,7 +6079,12 @@
       if (!toolbar) return;
       toolbar.querySelectorAll("[data-ms-act]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          msTableMutate(targetId, btn.getAttribute("data-ms-act"));
+          const act = btn.getAttribute("data-ms-act");
+          if (act === "ai-arrange") {
+            runMsAiArrange(targetId);
+            return;
+          }
+          msTableMutate(targetId, act);
         });
       });
       const ta = $(targetId);
@@ -5904,6 +6217,7 @@
         }
         target.dispatchEvent(new Event("input", { bubbles: true }));
         if (cfg.tableAware && MS_TABLE_MAP[cfg.targetId]) {
+          msLastOcrRaw[cfg.targetId] = textOut;
           const det = applyOcrMsTableHeuristic(cfg.targetId, textOut, replace, { forceTable: !!forceTable });
           if (det.table && det.forced) {
             setOcrStatus(status, "完成 — 未能自動對齊欄位，已強制建成表格＋文字（請核對）", "ok");
